@@ -1,0 +1,264 @@
+#DevStack
+
+Run only core services (Keystone, Nova, Neutron, Glance, Horizon).
+Disable heavy extras (Cinder, Swift, Heat, etc.).
+Use a small CirrOS image for testing.
+
+
+On Ubuntu:
+# Install prerequisites
+sudo apt update && sudo apt install -y git vim sudo lvm2
+
+# Clone DevStack
+git clone https://opendev.org/openstack/devstack
+cd devstack
+
+nano local.conf
+------------minimal services--------
+ADMIN_PASSWORD=secret
+DATABASE_PASSWORD=$ADMIN_PASSWORD
+RABBIT_PASSWORD=$ADMIN_PASSWORD
+SERVICE_PASSWORD=$ADMIN_PASSWORD
+SERVICE_TOKEN=tokentoken
+HOST_IP=127.0.0.1
+
+# Core services
+enable_service key g-api g-reg n-api n-sch n-cpu n-novnc horizon placement-api placement-client
+
+# LinuxBridge networking
+Q_AGENT=linuxbridge
+enable_service q-svc q-agt q-dhcp q-l3 q-meta
+disable_service q-ovn
+
+# Images
+IMAGE_URLS="http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img"
+
+--------------------------------------
+#Create and use the stack user
+./tools/create-stack-user.sh
+
+Create a new user named stack.
+Add it to the sudo group.
+Set permissions on the devstack folder.
+
+Login as root
+cp -r devstack /opt/stack/
+sudo chown -R stack:sudo /opt/stack/devstack
+
+# Run stack.sh (this will take a while)
+./stack.sh
+----------
+If issues 
+./unstack.sh
+./clean.sh
+#fix issues and then start again
+./stack.sh
+---------
+Output:
+=========================
+DevStack Component Timing
+ (times are in seconds)
+=========================
+wait_for_service      11
+async_wait            47
+osc                  131
+apt-get               26
+test_with_retry        0
+dbsync                 2
+pip_install           73
+apt-get-update         1
+run_process           30
+-------------------------
+Unaccounted time     120
+=========================
+Total runtime        441
+
+=================
+ Async summary
+=================
+ Time spent in the background minus waits: 203 sec
+ Elapsed time: 441 sec
+ Time if we did everything serially: 644 sec
+ Speedup:  1.46032
+
+
+Post-stack database query stats:
++------------+-----------+-------+
+| db         | op        | count |
++------------+-----------+-------+
+| keystone   | SELECT    | 22229 |
+| keystone   | INSERT    |    92 |
+| keystone   | UPDATE    |     7 |
+| neutron    | DESCRIBE  |     2 |
+| neutron    | CREATE    |     1 |
+| neutron    | SHOW      |     4 |
+| neutron    | SELECT    |  5998 |
+| neutron    | INSERT    |   845 |
+| placement  | SELECT    |    18 |
+| placement  | INSERT    |    77 |
+| placement  | SET       |     1 |
+| neutron    | UPDATE    |   253 |
+| neutron    | DELETE    |    31 |
+| nova_api   | SELECT    |    50 |
+| nova_cell1 | SELECT    |    50 |
+| nova_cell0 | SELECT    |    25 |
+| nova_cell0 | INSERT    |     5 |
+| nova_cell0 | UPDATE    |     2 |
+| placement  | UPDATE    |     3 |
+| cinder     | SELECT    |    55 |
+| cinder     | INSERT    |     5 |
+| cinder     | UPDATE    |     3 |
+| nova_api   | INSERT    |    20 |
+| nova_api   | SAVEPOINT |    10 |
+| nova_api   | RELEASE   |    10 |
+| glance     | INSERT    |    14 |
+| glance     | SELECT    |    25 |
+| glance     | UPDATE    |     2 |
+| nova_cell1 | INSERT    |     4 |
+| nova_cell1 | UPDATE    |    11 |
+| cinder     | DELETE    |     1 |
++------------+-----------+-------+
+
+
+
+This is your host IP address: 10.156.0.3
+This is your host IPv6 address: ::1
+Horizon is now available at http://10.156.0.3/dashboard
+Keystone is serving at http://10.156.0.3/identity/
+The default users are: admin and demo
+The password: SummerWinter
+
+Services are running under systemd unit files.
+For more information see:
+https://docs.openstack.org/devstack/latest/systemd.html
+
+DevStack Version: 2025.2
+Change: 63d874e4af67893effbd1ef9daf150fc41d15eec Merge "Restore os_CODENAME for old rhel distros" 2025-09-16 13:16:11 +0000
+OS Version: Ubuntu 24.04 noble
+
+2025-09-22 01:08:36.049 | stack.sh completed in 442 seconds.
+--------
+#If using ovs (not needed in our case)
+sudo apt install -y openvswitch-switch openvswitch-common
+sudo systemctl enable --now openvswitch-switch
+sudo ovs-vsctl show
+----------
+Note**
+RAM: You’ll need at least ~4 GB for even this minimal config. If the VM is smaller, services may fail.
+Access: Horizon will be bound to http://127.0.0.1/dashboard → usable if ports are exposed. Otherwise stick to the CLI (. openrc admin admin).
+Time: First run of stack.sh downloads source & builds, can take 15–30 minutes depending on VM
+
+----------------------------------
+#If using keystone
+tail -n 50 /opt/stack/logs/keystone.log
+ps aux | grep keystone
+
+sudo apt install -y python3-openstackclient
+#cat /opt/stack/devstack/openrc
+#export OS_AUTH_URL=http://127.0.0.1:5000/v3
+
+openstack --version
+source /opt/stack/devstack/openrc admin admin
+openstack token issue
+openstack image list
+
+If working
+openstack token issue returns a valid token
+openstack image list shows the Cirros image
+openstack server list shows any created instances
+
+#Other commands (depending on services activated via local.conf)
+openstack project list
+openstack user list
+openstack image list
+openstack hypervisor list
+openstack server list
+openstack network list
+
+=====================================
+nano setup-devstack.sh
+#!/bin/bash
+set -e
+
+echo "Setting up DevStack demo environment..."
+
+# Source admin credentials
+source ~/devstack/openrc admin admin
+
+# 1. Create project & user
+echo "Creating project and user..."
+openstack project create demo || true
+openstack user create --project demo --password demo demo || true
+openstack role add --user demo --project demo admin || true
+
+# 2. Create network, subnet & router
+echo "Setting up networking..."
+openstack network create demo-net || true
+openstack subnet create --network demo-net \
+  --subnet-range 10.0.0.0/24 demo-subnet || true
+
+if ! openstack router show demo-router &>/dev/null; then
+    openstack router create demo-router
+    openstack router set demo-router --external-gateway public
+    openstack router add subnet demo-router demo-subnet
+fi
+
+# 3. Add security group rules
+echo "Configuring security groups..."
+openstack security group rule create --proto icmp default || true
+openstack security group rule create --proto tcp --dst-port 22 default || true
+
+# 4. Generate SSH keypair
+echo "Generating SSH keypair..."
+if [ ! -f ~/cirros-key ]; then
+    ssh-keygen -t rsa -b 2048 -f ~/cirros-key -N ""
+fi
+openstack keypair create --public-key ~/cirros-key.pub cirros-key || true
+
+# 5. Launch CirrOS VM
+echo "Launching CirrOS VM..."
+openstack server create --flavor m1.tiny \
+  --image cirros-0.6.2-x86_64-disk \
+  --network demo-net \
+  --key-name cirros-key \
+  demo-vm || true
+
+# 6. Assign floating IP
+echo "Assigning floating IP..."
+FLOATING_IP=$(openstack floating ip create public -f value -c floating_ip_address)
+openstack server add floating ip demo-vm $FLOATING_IP
+
+echo "Setup complete!"
+echo "   VM Name: demo-vm"
+echo "   Floating IP: $FLOATING_IP"
+echo "   SSH Command: ssh -i ~/cirros-key cirros@$FLOATING_IP"
+
+----
+chmod +x setup-devstack.sh
+./setup-devstack.sh
+
+======================================================
+To edit script to contain dynamic image
+IMAGE_NAME=$(openstack image list -f value -c Name | grep cirros)
+openstack server create --flavor m1.tiny \
+  --image "$IMAGE_NAME" \
+  --network demo-net \
+  --key-name cirros-key \
+  demo-vm || true
+
+or upload the exact CirrOS image version , script expects
+openstack image create cirros-0.6.2-x86_64-disk \
+  --file ~/Downloads/cirros-0.6.2-x86_64-disk.img \
+  --disk-format qcow2 --container-format bare \
+  --public
+
+For cleanup
+# Delete demo project and user
+openstack project delete demo || true
+openstack user delete demo || true
+
+# Delete networks and routers
+openstack router delete demo-router || true
+openstack network delete demo-net || true
+
+

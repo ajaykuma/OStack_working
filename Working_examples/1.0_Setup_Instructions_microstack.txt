@@ -1,0 +1,640 @@
+Try a Quick Deployment (Test Environment)
+
+-- DevStack: Easiest way to try OpenStack on a single machine (for learning, not production).
+-- Packstack (on RHEL/CentOS): Quick all-in-one setup.
+-- MicroStack (Canonical/Ubuntu): Lightweight OpenStack for laptops/servers.
+-- OpenStack on Docker (Kolla): Run OpenStack services in containers.
+
+Production Deployment Options:
+-- OpenStack-Ansible or Kolla-Ansible: Production-grade deployment.
+-- Commercial distributions: Red Hat OpenStack Platform, Canonical Charmed OpenStack, Mirantis Cloud Platform.
+-- Hardware requirement: At least a few servers (compute + controller + storage nodes).
+
+-----------------------------------------------------
+More on Setup Options:
+
+DevStack
+
+What it is: A set of scripts to quickly bring up OpenStack services on a single machine.
+Best for: Learning how the services interact, trying OpenStack CLI commands, API calls, or dashboard (Horizon).
+
+Pros:
+Very popular for testing.
+Community-backed.
+Gets you almost the full OpenStack environment.
+
+Cons:
+Heavy on resources (needs ~8GB RAM minimum, more if you want smooth experience).
+Setup takes time (downloads source, compiles).
+Not production-suitable.
+
+MicroStack (Canonical/Ubuntu)
+
+What it is: A snap-based deployment of OpenStack by Canonical, designed to be lightweight.
+Best for: Quick install, getting a running OpenStack environment with less complexity.
+
+Pros:
+Simple snap install microstack --classic.
+Faster to set up than DevStack.
+Good for testing basic workloads.
+
+Cons:
+Fewer services enabled by default compared to DevStack.
+Less community usage than DevStack (more Canonical-focused).
+
+--------------------------------------
+
+#Microstack on Ubuntu
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install microstack
+sudo apt install snapd
+#sudo snap install core
+#sudo systemctl restart snapd
+sudo systemctl daemon-reload
+sudo snap install microstack --edge
+
+
+echo $PATH
+
+#if snap doesnt show up in path > add /snap/bin to path
+
+sudo nano /etc/environment
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+source /etc/environment
+echo $PATH
+
+
+# Initialize
+#sudo microstack init --auto
+
+The newer MicroStack builds don’t support a generic --auto anymore. You now have to tell it whether the node should be:
+a control node (API services, Horizon, scheduler, etc.)
+or a compute node (where VMs actually run).
+
+So we can do
+sudo microstack init --control
+#When you type microstack, snap checks which snap it belongs to and runs the right binary inside the snap package.
+#That should configure Keystone, Nova, Neutron, Horizon, etc.
+
+---------
+Output:
+ubuntu:~$ sudo microstack init --control
+Would you like to configure clustering? (yes/no) [default=yes] > yes
+2025-09-21 10:51:09,402 - microstack_init - INFO - Configuring clustering ...
+Please enter the ip address of the control node [default=172.30.1.2] > 
+2025-09-21 10:51:14,222 - microstack_init - INFO - Setting up as a control node.
+2025-09-21 10:51:18,970 - microstack_init - INFO - Generating TLS Certificate and Key
+2025-09-21 10:51:20,493 - microstack_init - INFO - Configuring networking ...
+2025-09-21 10:51:30,156 - microstack_init - INFO - Opening horizon dashboard up to *
+2025-09-21 10:51:31,638 - microstack_init - INFO - Waiting for RabbitMQ to start ...
+Waiting for 172.30.1.2:5672
+2025-09-21 10:51:44,271 - microstack_init - INFO - RabbitMQ started!
+2025-09-21 10:51:44,271 - microstack_init - INFO - Configuring RabbitMQ ...
+2025-09-21 10:51:46,601 - microstack_init - INFO - RabbitMQ Configured!
+2025-09-21 10:51:46,634 - microstack_init - INFO - Waiting for MySQL server to start ...
+Waiting for 172.30.1.2:3306
+2025-09-21 10:51:57,284 - microstack_init - INFO - Mysql server started! Creating databases ...
+2025-09-21 10:52:00,657 - microstack_init - INFO - Configuring Keystone Fernet Keys ...
+2025-09-21 10:52:22,970 - microstack_init - INFO - Bootstrapping Keystone ...
+2025-09-21 10:52:54,051 - microstack_init - INFO - Creating service project ...
+2025-09-21 10:53:01,845 - microstack_init - INFO - Keystone configured!
+2025-09-21 10:53:01,875 - microstack_init - INFO - Configuring the Placement service...
+2025-09-21 10:53:27,657 - microstack_init - INFO - Running Placement DB migrations...
+2025-09-21 10:53:32,951 - microstack_init - INFO - Configuring nova control plane services ...
+2025-09-21 10:54:08,842 - microstack_init - INFO - Running Nova API DB migrations (this may take a lot of time)...
+
+        [------
+	On a modern VM or server (4+ vCPUs, SSD, 8–16GB RAM) → usually 3–10 minutes.
+	On a small VM (1–2 vCPUs, spinning disk, <4GB RAM) → it can take 15–30 minutes or more.
+	On very resource-limited or busy systems → it may appear stuck, but it’s just grinding through migrations.
+          -------
+        What’s happening here..
+
+	alembic is running through all migration scripts to bring your DB schema up to date.
+	Two databases are touched:
+	nova_api (API-level resources like cell mappings, instance mappings).
+	nova (core compute DB with instances, quotas, etc.).
+	It runs sequentially, so progress isn’t shown until each batch finishes.
+        To check progress: (another terminal) sudo snap logs microstack -f
+                           ps aux | grep mysqld]
+
+Waiting for 10.156.0.2:8774
+2025-09-21 18:28:01,196 - microstack_init - INFO - Creating default flavors...
+2025-09-21 18:28:24,118 - microstack_init - INFO - Configuring nova compute hypervisor ...
+2025-09-21 18:28:24,118 - microstack_init - INFO - Checking virtualization extensions presence on the host
+2025-09-21 18:28:24,126 - microstack_init - WARNING - Unable to determine hardware virtualization support by CPU vendor id "GenuineIntel": assuming it is not supported.
+2025-09-21 18:28:24,126 - microstack_init - WARNING - Hardware virtualization is not supported - software emulation will be used for Nova instances
+2025-09-21 18:28:25,821 - microstack_init - INFO - Configuring the Spice HTML5 console service...
+2025-09-21 18:28:26,149 - microstack_init - INFO - Configuring Neutron
+Waiting for 10.156.0.2:9696
+2025-09-21 18:29:32,403 - microstack_init - INFO - Configuring Glance ...
+Waiting for 10.156.0.2:9292
+2025-09-21 18:30:02,755 - microstack_init - INFO - Adding cirros image ...
+2025-09-21 18:30:05,452 - microstack_init - INFO - Creating security group rules ...
+2025-09-21 18:30:14,072 - microstack_init - INFO - Configuring the Cinder services...
+2025-09-21 18:31:04,446 - microstack_init - INFO - Running Cinder DB migrations...  
+(experimental) Would you like to setup a loop device-backed LVM volume backend for Cinder? (yes/no) [default=no] > no
+2025-09-21 18:32:55,416 - microstack_init - INFO - Setting up cinder-volume service with the LVM backend...    
+2025-09-21 19:14:24,666 - microstack_init - INFO - restarting libvirt and virtlogd ...
+2025-09-21 19:14:55,019 - microstack_init - INFO - Complete. Marked microstack as initialized!
+Would you like to setup extra services? (yes/no) [default=no] > 
+...
+microstack purge if needed & rerun
+sudo snap remove --purge microstack
+sudo microstack init --control
+---------
+# Check status
+sudo microstack status
+or
+sudo snap services microstack
+
+# Access Horizon dashboard
+sudo microstack.openstack service list
+-----
++----------------------------------+-----------+-----------+
+| ID                               | Name      | Type      |
++----------------------------------+-----------+-----------+
+| 3e461f63eb244f43a48a72dd555c9f6e | glance    | image     |
+| 46f415b939b74ccd9f6461ebe58bd813 | keystone  | identity  |
+| 49b4ca9b758a4b1da08112f75457fd29 | cinderv3  | volumev3  |
+| 7dc410ee25364aa2808454783ae693c8 | cinderv2  | volumev2  |
+| 7eee44bec3bd4b4fb141fcb7c20643f9 | neutron   | network   |
+| b653184d90e44aeaa1d53e2ccf6ac3c5 | placement | placement |
+| f08661901f1e4ebc8d225bc41fecd4b8 | nova      | compute   |
++----------------------------------+-----------+-----------+
+
+-----
+
+#check if you can issue a token
+sudo microstack.openstack token issue
+-----------------
+##Minimal OpenStack CLI Walkthrough (MicroStack)
+
+Run everything after microstack init --control is complete.
+
+1. Source admin credentials
+# Add environment variables for OpenStack CLI
+source /var/snap/microstack/common/etc/microstack.rc
+
+2. Create a project & user
+# New project
+microstack.openstack project create demo
+
+# New user (with password 'demo')
+microstack.openstack user create --project demo --password demo demo
+
+# Assign admin role
+microstack.openstack role add --user demo --project demo admin
+
+3. Create a network, subnet & router
+## Network
+microstack.openstack network create demo-net
+
+# Subnet (10.0.0.0/24)
+microstack.openstack subnet create --network demo-net \
+  --subnet-range 10.0.0.0/24 demo-subnet
+
+# Router + external gateway
+microstack.openstack router create demo-router
+microstack.openstack router set demo-router --external-gateway external
+microstack.openstack router add subnet demo-router demo-subnet
+
+4. Create a security group rule (allow SSH & ping)
+# Allow ICMP (ping)
+microstack.openstack security group rule create --proto icmp default
+
+# Allow SSH
+microstack.openstack security group rule create --proto tcp --dst-port 22 default
+
+------
+root@gcp-u1:~# microstack.openstack security group rule create --proto icmp default
+Error while executing command: ConflictException: 409, Security group rule already exists. Rule id is da0b1177-4a8c-469e-a310-f1bffa36c0dd.
+root@gcp-u1:~# microstack.openstack security group rule create --proto tcp --dst-port 22 default
+Error while executing command: ConflictException: 409, Security group rule already exists. Rule id is d03ebd5d-e531-4e06-999f-a5008bacc94c.
+------
+
+5. Launch a small test VM
+# Get smallest flavor
+microstack.openstack flavor list
+
+# Launch CirrOS VM
+microstack.openstack server create --flavor m1.tiny \
+  --image cirros \
+  --network demo-net \
+  demo-vm
+
+6. Check status
+microstack.openstack server list
+
+--To reach VM
+Add Floating IP & Ping Your VM
+1. Create a floating IP
+# Create a floating IP from the external network
+microstack.openstack floating ip create external
+
+2. Associate floating IP with your VM
+# Replace <FLOATING_IP> with the address you got above
+microstack.openstack server add floating ip demo-vm <FLOATING_IP>
+
+3. Verify the VM has both internal & floating IPs
+microstack.openstack server list
+
+4. Ping the VM
+apt install iputils-ping
+ping -c 4 <FLOATING_IP>
+
+-----------------------
+#SSH into CirrOS VM
+# Generate a keypair locally
+ssh-keygen -t rsa -b 2048 -f ~/cirros-key -N ""
+
+# Upload public key to OpenStack
+
+cp /root/cirros-key.pub /var/snap/microstack/common/
+microstack.openstack keypair create --public-key /var/snap/microstack/common/cirros-key.pub cirros-key
+
+Launch VM with key pair
+Instead of the earlier server create, re-run it with --key-name:
+
+microstack.openstack server create --flavor m1.tiny \
+  --image cirros \
+  --network demo-net \
+  --key-name cirros-key \
+  demo-vm
+
+--wait & then check
+microstack.openstack server list
+
+
+--Assign floating IP
+
+# Create a floating IP
+microstack.openstack floating ip create external
+
+# Assign it to the VM
+>if servers exist with same name, use id from server list
+microstack.openstack server list
+microstack.openstack server add floating ip 58a855fc-0566-4bd6-89f6-792d2a2ea76b <FLOATING_IP>
+microstack.openstack server add floating ip demo-vm <FLOATING_IP>
+
+--SSH into VM
+ssh -i ~/cirros-key cirros@<FLOATING_IP>
+[Default username: cirros]
+
+----------------
+#Cleanup Script:
+sudo apt install vim
+------
+#!/bin/bash
+set -e
+
+echo "Cleaning up OpenStack resources..."
+
+# Source credentials
+source /var/snap/microstack/common/etc/microstack.rc
+
+# Delete floating IPs
+for fip in $(microstack.openstack floating ip list -f value -c "ID"); do
+    echo "Deleting floating IP $fip"
+    microstack.openstack floating ip delete $fip
+done
+
+# Delete VM(s)
+for vm in $(microstack.openstack server list -f value -c "ID"); do
+    echo "Deleting VM $vm"
+    microstack.openstack server delete $vm
+done
+
+# Delete router interfaces
+for subnet in $(microstack.openstack subnet list -f value -c "ID"); do
+    if microstack.openstack router show demo-router &>/dev/null; then
+        echo "Removing subnet $subnet from router"
+        microstack.openstack router remove subnet demo-router $subnet || true
+    fi
+done
+
+# Delete router
+if microstack.openstack router show demo-router &>/dev/null; then
+    echo "Deleting router demo-router"
+    microstack.openstack router delete demo-router
+fi
+
+# Delete network(s)
+for net in $(microstack.openstack network list -f value -c "Name" | grep -v external); do
+    echo "Deleting network $net"
+    microstack.openstack network delete $net || true
+done
+
+# Delete keypairs
+for key in $(microstack.openstack keypair list -f value -c "Name"); do
+    echo "Deleting keypair $key"
+    microstack.openstack keypair delete $key
+done
+
+# Delete project + user (demo)
+if microstack.openstack project show demo &>/dev/null; then
+    echo "Deleting project demo"
+    microstack.openstack project delete demo
+fi
+if microstack.openstack user show demo &>/dev/null; then
+    echo "Deleting user demo"
+    microstack.openstack user delete demo
+fi
+
+echo "Cleanup complete"
+
+------
+chmod +x cleanup.sh
+./cleanup.sh
+
+snap services microstack
+
+---If msgs which show network could not be deleted
+---Networks cannot be deleted if there are ports still attached, usually from leftover DHCP ports or leftover interfaces.
+# List ports on the network
+microstack.openstack port list --network test
+
+# Delete leftover ports
+microstack.openstack port delete <port-id>
+
+# Then try to delete network
+microstack.openstack network delete test
+
+Then After cleanup:
+microstack.openstack server list          # should show no servers
+microstack.openstack floating ip list     # should show no floating IPs
+microstack.openstack network list         # only 'external' network may remain
+microstack.openstack router list          # should show no routers
+microstack.openstack keypair list         # should be empty
+microstack.openstack project list         # demo project should be gone
+
+---------
+Enhanced script:
+vi cleanup2.sh
+
+---
+#!/bin/bash
+set -e
+
+echo "Starting MicroStack cleanup..."
+
+# Source MicroStack credentials
+source /var/snap/microstack/common/etc/microstack.rc
+
+# Delete floating IPs
+for fip in $(microstack.openstack floating ip list -f value -c "ID"); do
+    echo "Deleting floating IP $fip"
+    microstack.openstack floating ip delete $fip || true
+done
+
+# Delete all VMs
+for vm in $(microstack.openstack server list -f value -c "ID"); do
+    echo "Deleting VM $vm"
+    microstack.openstack server delete $vm || true
+done
+
+# Wait a few seconds for VMs to fully disappear
+sleep 5
+
+# Remove router interfaces
+for router in $(microstack.openstack router list -f value -c "Name"); do
+    for subnet in $(microstack.openstack subnet list -f value -c "ID"); do
+        echo "Removing subnet $subnet from router $router"
+        microstack.openstack router remove subnet $router $subnet || true
+    done
+done
+
+# Delete routers
+for router in $(microstack.openstack router list -f value -c "Name"); do
+    echo "Deleting router $router"
+    microstack.openstack router delete $router || true
+done
+
+# Delete ports on networks to avoid ConflictException
+for net in $(microstack.openstack network list -f value -c "Name" | grep -v external); do
+    for port in $(microstack.openstack port list --network $net -f value -c "ID"); do
+        echo "Deleting port $port on network $net"
+        microstack.openstack port delete $port || true
+    done
+done
+
+# Delete networks
+for net in $(microstack.openstack network list -f value -c "Name" | grep -v external); do
+    echo "Deleting network $net"
+    microstack.openstack network delete $net || true
+done
+
+# Delete keypairs
+for key in $(microstack.openstack keypair list -f value -c "Name"); do
+    echo "Deleting keypair $key"
+    microstack.openstack keypair delete $key || true
+done
+
+# Delete projects and users (demo)
+for proj in $(microstack.openstack project list -f value -c "Name" | grep demo); do
+    echo "Deleting project $proj"
+    microstack.openstack project delete $proj || true
+done
+
+for user in $(microstack.openstack user list -f value -c "Name" | grep demo); do
+    echo "Deleting user $user"
+    microstack.openstack user delete $user || true
+done
+
+echo "MicroStack cleanup complete!"
+---
+==============
+
+All in one setup script
+nano setup.sh
+---------
+#!/bin/bash
+set -e
+
+echo "Setting up OpenStack demo environment..."
+
+# Source credentials
+source /var/snap/microstack/common/etc/microstack.rc
+
+# Paths
+KEY_DIR=/var/snap/microstack/common
+KEY_NAME=cirros-key
+KEY_PRIVATE=~/cirros-key
+KEY_PUBLIC=$KEY_DIR/cirros-key.pub
+
+# Create project & user
+echo "Creating project and user..."
+microstack.openstack project create demo || true
+microstack.openstack user create --project demo --password demo demo || true
+microstack.openstack role add --user demo --project demo admin || true
+
+# Create network, subnet & router
+echo "Setting up networking..."
+microstack.openstack network create demo-net || true
+microstack.openstack subnet create --network demo-net --subnet-range 10.0.0.0/24 demo-subnet || true
+
+if ! microstack.openstack router show demo-router &>/dev/null; then
+    microstack.openstack router create demo-router
+    microstack.openstack router set demo-router --external-gateway external
+fi
+
+# Ensure subnet is attached to router
+if ! microstack.openstack router show demo-router -f value -c interfaces | grep -q demo-subnet; then
+    microstack.openstack router add subnet demo-router demo-subnet
+fi
+
+# Security group rules
+echo "Configuring security groups..."
+microstack.openstack security group rule create --proto icmp default || true
+microstack.openstack security group rule create --proto tcp --dst-port 22 default || true
+
+# Generate SSH keypair
+echo "Generating SSH keypair..."
+if [ ! -f "$KEY_PRIVATE" ]; then
+    ssh-keygen -t rsa -b 2048 -f "$KEY_PRIVATE" -N ""
+fi
+
+# Copy public key to snap-accessible path
+cp -f "$KEY_PRIVATE.pub" "$KEY_PUBLIC"
+
+# Create keypair in OpenStack (idempotent)
+if ! microstack.openstack keypair show $KEY_NAME &>/dev/null; then
+    microstack.openstack keypair create --public-key "$KEY_PUBLIC" $KEY_NAME
+fi
+
+# Launch CirrOS VM
+echo "Launching CirrOS VM..."
+SERVER_ID=$(microstack.openstack server create --flavor m1.tiny \
+  --image cirros \
+  --network demo-net \
+  --key-name $KEY_NAME \
+  demo-vm -f value -c id)
+
+# Wait until server is ACTIVE
+echo "Waiting for VM to become ACTIVE..."
+#microstack.openstack server wait --active $SERVER_ID
+
+echo "Waiting for VM to become ACTIVE..."
+while true; do
+    STATUS=$(microstack.openstack server show $SERVER_ID -f value -c status)
+    echo "Current status: $STATUS"
+    if [ "$STATUS" == "ACTIVE" ]; then
+        break
+    elif [ "$STATUS" == "ERROR" ]; then
+        echo "VM creation failed!"
+        exit 1
+    fi
+    sleep 3
+done
+
+# Assign floating IP
+echo "Assigning floating IP..."
+FLOATING_IP=$(microstack.openstack floating ip create external -f value -c floating_ip_address)
+microstack.openstack server add floating ip $SERVER_ID $FLOATING_IP
+
+echo "Setup complete!"
+echo "   VM Name: demo-vm"
+echo "   Floating IP: $FLOATING_IP"
+echo "   SSH Command: ssh -i $KEY_PRIVATE cirros@$FLOATING_IP"
+
+---------
+chmod +x setup-microstack.sh
+./setup.sh
+-----------
+Validate
+./validate.sh
+------------------
+snap services microstack
+root@gcp-u1:~# snap services microstack | grep horizon
+microstack.horizon-uwsgi → this is the service that serves the Horizon web UI.
+---------------------------
+
+MicroStack by default binds to localhost for security.
+> Access from browser:
+http://localhost:80
+http://localhost:8080
+--------------------------
+#Option 1#
+>copy and modify the *.pem file
+>sshport-forwarding
+hdu@gcp-u1:~$ ssh -i gcp1.pem -L 8080:127.0.0.1:80 hdu@35.246.184.202
+lsof -i :8080
+then locally:
+http://localhost:8080
+
+Edit the snap’s config to allow external access:
+sudo snap set microstack dashboard-public-url=http://0.0.0.0
+
+Openstack admin credentials:
+cat /var/snap/microstack/common/etc/microstack.rc
+OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME
+demo demo demo
+---------------------------------------
+If failures:
+sudo snap services microstack
+sudo snap restart microstack.horizon-uwsgi
+sudo snap logs microstack.horizon-uwsgi -n 50
+
+--check if smthing is running on 80
+sudo ss -tlnp | grep ':80'
+
+--check or find configs
+sudo find /snap/microstack/current/ -name "horizon*" | grep horizon.ini
+sudo find /snap/microstack/current/ -name "*uwsgi*"
+
+--check if nginx is serving
+ps aux | grep nginx
+sudo grep -R "horizon" /var/snap/microstack/common/etc/nginx/
+
+--if so then
+ssh -i gcp1.pem -L 8443:127.0.0.1:443 hdu@35.246.184.202
+curl -vk https://127.0.0.1/
+lsof -i :8080
+
+---------------------------------------
+#Option 2#
+Editing to expose it to public ip of host
+--Backup NGINX and Horizon config
+sudo cp /var/snap/microstack/common/etc/nginx/sites-enabled/horizon.conf \
+        /var/snap/microstack/common/etc/nginx/sites-enabled/horizon.conf.bak
+
+edit sudo vi /var/snap/microstack/common/etc/nginx/sites-enabled/horizon.conf
+listen 0.0.0.0:443 ssl;
+listen <YOUR_VM_PUBLIC_IP>:443 ssl;
+
+Restart
+sudo snap restart microstack.horizon-uwsgi
+sudo snap restart microstack.nginx
+
+Access using public ip.
+
+Login as admin and pswd from
+/var/snap/microstack/common/etc/microstack.rc
+
+----------------------
+Final shutdown
+#sudo snap stop microstack (dont do this)
+sudo microstack.openstack service list
+sudo snap start microstack
+sudo microstack.openstack service list
+sudo snap services microstack
+
+snap info microstack
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
