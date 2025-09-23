@@ -1,0 +1,49 @@
+root@mac1:~# sudo microstack add-compute
+Use the following connection string to add a new compute node to the cluster (valid for 20 minutes from this moment):
+hKhob3N0bmFtZaoxMC4xNTYuMC41q2ZpbmdlcnByaW50xCCr/lr6cgAjcuyMl8d+wME2lIwPw8BiWIWY7+65VxizWqJpZNkgMGU5YjVjMjU1ZmIxNGNjOTlmYzFiNTRhMGU0ZDRkNzamc2VjcmV02SBEdHVpRldpVUV2WHpDNGhBa25VRXlmTkFPeW9zalhRUA==
+
+root@mac2:~# sudo microstack init --auto --compute --join "hKhob3N0bmFtZaoxMC4xNTYuMC41q2ZpbmdlcnByaW50xCCr/lr6cgAjcuyMl8d+wME2lIwPw8BiWIWY7+65VxizWqJpZNkgMGU5YjVjMjU1ZmIxNGNjOTlmYzFiNTRhMGU0ZDRkNzamc2VjcmV02SBEdHVpRldpVUV2WHpDNGhBa25VRXlmTkFPeW9zalhRUA=="
+
+on both nodes:
+root@mac2:~# microstack.openstack hypervisor list
++----+---------------------+-----------------+------------+-------+
+| ID | Hypervisor Hostname | Hypervisor Type | Host IP    | State |
++----+---------------------+-----------------+------------+-------+
+|  1 | mac1                | QEMU            | 10.156.0.5 | up    |
+|  2 | mac2                | QEMU            | 10.156.0.6 | up    |
+
+
+on control node:
+root@mac1:~# microstack.openstack service list
++----------------------------------+-----------+-----------+
+| ID                               | Name      | Type      |
++----------------------------------+-----------+-----------+
+| 19791f60e8d049ab8d6ea418d198aed5 | keystone  | identity  |
+| 1ea987b3c86f4b67bba61e3fcbe8a6d8 | glance    | image     |
+| 2d48e3be7b354fe5a5e6f1a6218873d2 | cinderv3  | volumev3  |
+| 3b40dd947e234739b7829f2827058f8b | neutron   | network   |
+| 4b21ca7bf764406f90dabf747c96099c | placement | placement |
+| 582ef2eaea4149c6b033950673f5b951 | cinderv2  | volumev2  |
+| 8a08bacb224545328ea4ede2c07e6daf | nova      | compute   |
++----------------------------------+-----------+-----------+
+
+on both nodes:root@mac2:~# microstack.openstack image list
++--------------------------------------+--------+--------+
+| ID                                   | Name   | Status |
++--------------------------------------+--------+--------+
+| d67443f2-1d54-4c8a-8cf2-1f92ae304635 | cirros | active |
++--------------------------------------+--------+--------+
+
+
+After restart
+sudo snap start microstack
+sudo snap services microstack
+
+rejoin compute node if needed
+microstack.openstack service list
+microstack.openstack hypervisor list
+microstack.openstack image list
+
+
+
+

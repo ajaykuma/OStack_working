@@ -1,0 +1,81 @@
+
+Install EPEL
+Make sure the EPEL repo (Extra Packages for Enterprise Linux) is enabled. On RHEL/CentOS/Rocky9:
+
+sudo dnf install -y epel-release
+
+or
+sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+
+Install RDO
+sudo dnf install -y http://trunk.rdoproject.org/rdo_release/rdo-release.el9s.rpm
+
+Update metadata / repos
+sudo dnf clean all
+sudo dnf makecache
+sudo dnf update
+
+
+sudo dnf clean all
+sudo dnf makecache
+sudo dnf install -y openstack-packstack
+
+packstack --allinone
+or (if failure, after ensuring pswd less ssh access works for root)
+sudo packstack --answer-file /root/packstack-answers-20250923-054614.txt
+
+After setup:
+http://<your_host_ip>/dashboard
+--credentials in
+/root/keystonerc_admin
+
+Load credentials for use;
+source ~/keystonerc_admin
+
+openstack project list
+openstack server list
+
+#Launching a vm
+1. Upload a cloud image:
+wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+openstack image create "Ubuntu-20.04" --file focal-server-cloudimg-amd64.img --disk-format qcow2 --container-format bare --public
+
+2. Create a flavour
+openstack flavor create --ram 2048 --disk 20 --vcpus 2 m1.small
+
+3. Create network
+openstack network create private-net
+openstack subnet create --network private-net --subnet-range 192.168.100.0/24 private-subnet
+
+4. Launch VM
+openstack server create --image "Ubuntu-20.04" --flavor m1.small --network private-net test-vm
+
+[Optional]
+--Multi node deployment
+--Generate an answers file
+packstack --gen-answer-file=answers.txt
+
+Edit answers.txt → add IPs/roles for controller, compute, storage nodes.
+
+--Deploy
+packstack --answer-file=answers.txt
+
+
+
+------------------
+If issues:
+------------------
+
+sudo yum install subscription-manager
+sudo subscription-manager register
+
+[root@cent1 ~]# sudo subscription-manager attach --auto
+Ignoring the request to auto-attach. Attaching subscriptions is disabled for organization "19744978" because Simple Content Access (SCA) is enabled.
+
+sudo subscription-manager repos --enable=rhel-9-for-x86_64-baseos-rpms \
+                                --enable=rhel-9-for-x86_64-appstream-rpms
+
+
+
+
+
