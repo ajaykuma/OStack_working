@@ -1,0 +1,457 @@
+/etc/keystone/keystone.conf
+/etc/keystone/policy.yaml – RBAC rules and permissions
+/etc/keystone/keystone-paste.ini – WSGI middleware pipeline
+/etc/keystone/logging.conf – Logging configuration (optional)
+
+Identity
+This section controls the identity backend. Using SQL means Keystone stores users, projects, etc., in its own DB.
+driver: Determines where Keystone stores users, groups, and domains.
+sql → local MySQL/PostgreSQL DB (default)
+ldap → connect to an LDAP/AD server
+
+Resource
+Handles storage of projects (tenants), domains, and groups.
+Again, sql is the default driver, but can be extended.
+
+Auth
+This defines how users authenticate. Common methods:
+
+password – username/password
+token – existing Keystone token
+openid, saml2, oauth1 – for federated identity
+
+Token
+fernet is the recommended lightweight, encrypted token type.
+expiration sets how long tokens last (in seconds).
+
+Assignment
+Defines how Keystone maps users ↔ roles ↔ projects.
+Almost always left as sql.
+
+Endpoints
+Endpoints are stored in the DB. You can add them via CLI:
+They are what Horizon reads to know where to send Nova, Neutron, etc. requests.
+openstack endpoint create --region RegionOne compute public http://controller:8774/v2.1
+
+Different endpoints for different projects
+If you want different endpoints for different projects, enable these:
+Then associate certain service endpoints with certain projects.
+
+-----------------------
+Policy: Controlling Access at a Granular Level
+
+Keystone also uses a policy file (YAML) to define who can do what.
+For example, /etc/keystone/policy.yaml might include:
+
+identity:create_user: "role:admin"
+identity:create_project: "role:admin"
+identity:list_projects: "role:admin or role:member"
+
+-----------------------------
+For horizon :
+sudo nano /var/snap/microstack/common/etc/horizon/local_settings.d/policy.json
+
+{
+    "identity": {
+        "admin_required": "role:admin"
+    },
+    "compute:create": "role:admin",
+    "compute:delete": "role:admin",
+    "compute:start": "role:admin",
+    "compute:stop": "role:admin",
+    "compute:view": "rule:admin_required or role:member"
+}
+
+This policy.json is basically controlling who can manage instances in Horizon.
+Compute (Nova) permissions:
+compute:create, compute:delete, compute:start, compute:stop → only admins can do these actions.
+compute:view → admins or regular members can view instances.
+
+Apply changes:
+sudo snap restart microstack
+
+Test the new policy
+
+Log in to Horizon with a non-admin user (role: member).
+Try to create a new instance → It should fail with a permissions error.
+Log in as admin → You should be able to create, delete, stop, and start instances.
+
+To check from command line:
+microstack.openstack token issue
+microstack.openstack server list
+
+A member will be able to see servers but not start/stop/delete them.
+An admin can do everything.
+
+Note**
+MicroStack may cache policies; always restart the snap after changing policy.json.
+You can define more granular rules for other services (like glance, neutron) in the same file.
+In newer OpenStack versions, Horizon can use policy.yaml instead of policy.json—MicroStack usually supports both.
+
+
+For example:
+/var/snap/microstack/common/etc/horizon/local_settings.d/policy.json
+{
+  "rules": {
+    "allow_demo_create": "role:demo"
+  },
+  "compute:create": "rule:allow_demo_create",
+  "compute:delete": "role:admin",
+  "compute:start": "role:admin",
+  "compute:stop": "role:admin",
+  "compute:view": "rule:allow_demo_create or role:admin"
+}
+
+Only users with role:demo can create instances.
+All other actions (delete, start, stop) remain restricted to admin.
+compute:view allows either admin or demo to view instances.
+
+sudo snap restart microstack
+
+microstack.openstack user create --project <project-name> --password pass123 demo
+microstack.openstack role create demo
+microstack.openstack role add --project <project-name> --user demo demo
+
+microstack.openstack user create --project <project-name> --password pass123 demo2
+microstack.openstack role create demo2
+microstack.openstack role add --project <project-name> --user demo2 demo2
+
+Scenario1 : Project scoping related
+microstack.openstack --os-username demo --os-password pass123 --os-project-name demo server create --flavor m1.small --image cirros test-vm
+microstack.openstack --os-username demo2 --os-password pass123 --os-project-name demo server create --flavor m1.small --image cirros test-vm2
+ERROR: openstack Compute API: Policy doesn't allow compute:create to be performed. (HTTP 403) [should have happened but doesnt]
+
+Test via Horizon (Web UI)
+
+Log in as demo → You should see the “Launch Instance” button and it should succeed.
+Log in as demo2 → You will either not see the button or get a “Policy doesn’t allow” error on launch.
+Both users can see instances and even try launching instance (provided have image for project,network and subnet) or launching instance will fail
+or show some error.
+
+Note**
+Policy enforcement is evaluated by the service API (Nova in this case), not Horizon itself — Horizon just reflects those rules.
+If you don’t restart the snap after editing policy.json, it will not reload the new policy.
+This works even if both users are in the same project, because policy decisions are based on roles, not projects.
+
+Even though you added a policy.json in Horizon’s config directory, that file is only used by Horizon (the web UI) — 
+it is not consulted by Nova, Glance, Neutron, etc. when enforcing permissions.
+The actual enforcement of who can compute:create, compute:delete, etc. is done inside Nova API — not Horizon.
+
+-----------------------------------------------------------------------
+#NOVA part (see down)
+How to enforce RBAC in MicroStack Nova
+----------------------------------------------------------------------
+
+#From horizon UI both users show launch instance option but it doesnt show networks which are existing and thus not able to create instance from horizon.
+
+When you click “Launch Instance” in Horizon, the UI fetches network choices from Neutron via its API.
+If the API call returns zero networks, Horizon will show the form but fail at the “Networks” step — making instance creation impossible.
+
+Reason 1:
+The networks exist but are not owned by the project the user is scoped to
+By default, Neutron only lists networks belonging to the current project (tenant).
+If your existing network was created in the admin project (or another one), users in project demo won’t see it.
+
+#Check which project owns the network:
+
+root@ajay-bysr:~# microstack.openstack network list --long
++--------------------------------------+---------------+--------+----------------------------------+-------+--------+--------------------------------------+--------------+-------------+--------------------+------+
+| ID                                   | Name          | Status | Project                          | State | Shared | Subnets                              | Network Type | Router Type | Availability Zones | Tags |
++--------------------------------------+---------------+--------+----------------------------------+-------+--------+--------------------------------------+--------------+-------------+--------------------+------+
+| 7d122c22-e6fa-4d03-bcbb-d62b71e165bc | external      | ACTIVE | 3094c3d2487a4eb5ab7c1a82e541c236 | UP    | False  | 265abba0-680c-4a22-b845-9fec3bb05748 | flat         | External    |                    |      |
+| 8e459c9e-d436-4b00-8410-ff0bf7b30e27 | Test-network  | ACTIVE | 79c1f5b44c17486c9738d4434afb7c3e | UP    | False  |                                      | geneve       | Internal    |                    |      |
+| a033cdf4-94bd-4300-9c92-ea09f63c6756 | admin_network | ACTIVE | 3094c3d2487a4eb5ab7c1a82e541c236 | UP    | False  | 7d643ca1-19a5-4446-b648-79d581730456 | geneve       | Internal    |                    |      |
+
+
+--so either we need to share the network
+microstack.openstack network set --share <network-id>
+or
+--create network in demo project or edit network to have subnet
+microstack.openstack network create --project demo demo-net
+microstack.openstack subnet create --network demo-net --subnet-range 192.168.100.0/24 demo-subnet
+
+Reason 2:
+Even if the network exists and is shared, Horizon will hide it if Neutron’s policy.json says the role can’t list networks.
+Is there any policy for neutron: NO
+Check > /var/snap/microstack/common/etc/neutron/policy.json
+
+If not, Neutron is using default policy, which usually requires either:
+
+the project to own the network, or
+the network to be shared.
+
+Reason 3:
+Horizon cache
+clear your browser cache or log out/in again — Horizon can sometimes cache responses.
+
+So Create a network and attach subnet to it from UI
+or from command line 
+
+--to attach subnet
+microstack.openstack subnet create demo-subnet \
+  --network Test-network \
+  --subnet-range 192.168.50.0/24 \
+  --gateway 192.168.50.1 \
+  --dns-nameserver 8.8.8.8
+
+and then test creating an instance by demo account from UI.
+It might show network but allow you to create instance but does that succeed? NO
+
+Error: “Invalid image identifier or unable to access requested image”
+That means the VM build started fine, network and compute were OK, 
+but Glance (image service) denied or failed the request when Nova tried to fetch the image.
+
+Reason: image visibility and project scoping
+The image (cirros or whatever you used) was created in the admin project.
+By default, images created in one project are private and only visible to that project.
+
+When a non-admin user (like demo) tries to launch an instance, Nova sends a request to Glance to fetch the image >
+Glance returns 403 Forbidden or 400 Invalid image because that image is not accessible to the demo project.
+
+--From command line check image list
+
+root@ajay-bysr:~# microstack.openstack --os-username demo --os-password pass123 --os-project-name demo image list
++--------------------------------------+--------------+--------+
+| ID                                   | Name         | Status |
++--------------------------------------+--------------+--------+
+| 1978770a-aeff-49ae-a165-3fec81daa1b5 | Ubuntu-22.04 | active |
+| 90d86edf-46a9-4347-a217-7f9a9ee1b628 | cirros       | active |
++--------------------------------------+--------------+--------+
+
+Image shown.
+
+--check about image
+root@ajay-bysr:~# microstack.openstack image show cirros
++------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Field            | Value                                                                                                                                                                                                                                                                                                                                                                                                               |
++------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| checksum         | 443b7623e27ecf03dc9e01ee93f67afe                                                                                                                                                                                                                                                                                                                                                                                    |
+| container_format | bare                                                                                                                                                                                                                                                                                                                                                                                                                |
+| created_at       | 2025-09-23T11:19:30Z                                                                                                                                                                                                                                                                                                                                                                                                |
+| disk_format      | qcow2                                                                                                                                                                                                                                                                                                                                                                                                               |
+| file             | /v2/images/90d86edf-46a9-4347-a217-7f9a9ee1b628/file                                                                                                                                                                                                                                                                                                                                                                |
+| id               | 90d86edf-46a9-4347-a217-7f9a9ee1b628                                                                                                                                                                                                                                                                                                                                                                                |
+| min_disk         | 0                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| min_ram          | 0                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| name             | cirros                                                                                                                                                                                                                                                                                                                                                                                                              |
+| owner            | 3094c3d2487a4eb5ab7c1a82e541c236                                                                                                                                                                                                                                                                                                                                                                                    |
+| properties       | os_hash_algo='sha512', os_hash_value='6513f21e44aa3da349f248188a44bc304a3653a04122d8fb4535423c8e1d14cd6a153f735bb0982e2161b5b5186106570c17a9e58b64dd39390617cd5a350f78', os_hidden='False', owner_specified.openstack.md5='443b7623e27ecf03dc9e01ee93f67afe', owner_specified.openstack.object='images/cirros', owner_specified.openstack.sha256='a8dd75ecffd4cdd96072d60c2237b448e0c8b2bc94d57f10fdbc8c481d9005b8' |
+| protected        | False                                                                                                                                                                                                                                                                                                                                                                                                               |
+| schema           | /v2/schemas/image                                                                                                                                                                                                                                                                                                                                                                                                   |
+| size             | 12716032                                                                                                                                                                                                                                                                                                                                                                                                            |
+| status           | active                                                                                                                                                                                                                                                                                                                                                                                                              |
+| tags             |                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| updated_at       | 2025-09-23T11:19:30Z                                                                                                                                                                                                                                                                                                                                                                                                |
+| visibility       | public                                                                                                                                                                                                                                                                                                                                                                                                              |
++------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+It shows visibility: public but owned by 90d86edf-46a9-4347-a217-7f9a9ee1b628 ie admin
+
+--we can make it shared
+microstack.openstack image set --public cirros
+
+--to retain isolation
+root@ajay-bysr:~# microstack.openstack --os-username demo --os-password pass123 --os-project-name demo image create   \
+--disk-format qcow2   --container-format bare   --file /var/snap/microstack/common/images/cirros-0.4.0-x86_64-disk.img   demo-cirros
+
+Before doing that check logs
+sudo less /var/snap/microstack/common/log/nova/nova.log
+
+In log errors points to cinder
+Nova is trying to talk to Cinder (block storage) to create a boot volume from the image, and Cinder is the one saying 
+"Invalid image identifier" — not Glance.
+
+Try and check if Cinder can see the image
+
+root@ajay-bysr:~# microstack.openstack --os-username demo --os-password pass123 --os-project-name demo volume create --size 1 --image demo-cirros testvol
+Invalid image identifier or unable to access requested image. (HTTP 400) (Request-ID: req-6b02d26a-444f-4588-b506-543c7b536ab5)
+
+--if the backend itself is functional, try creating a blank volume:
+root@ajay-bysr:~# microstack.openstack --os-username demo --os-password pass123 --os-project-name demo volume create --size 1 blanktest
++---------------------+--------------------------------------+
+| Field               | Value                                |
++---------------------+--------------------------------------+
+| attachments         | []                                   |
+| availability_zone   | nova                                 |
+| bootable            | false                                |
+| consistencygroup_id | None                                 |
+| created_at          | 2025-09-24T19:35:04.000000           |
+| description         | None                                 |
+| encrypted           | False                                |
+| id                  | a53098de-2b98-4387-af0b-f62a5932f491 |
+| multiattach         | False                                |
+| name                | blanktest                            |
+| properties          |                                      |
+| replication_status  | None                                 |
+| size                | 1                                    |
+| snapshot_id         | None                                 |
+| source_volid        | None                                 |
+| status              | creating                             |
+| type                | __DEFAULT__                          |
+| updated_at          | None                                 |
+| user_id             | c9e631190a9d4f9fb93b4a6764d1435f     |
++---------------------+--------------------------------------+
+
+Volume creation from image → requires Cinder → Glance API call.
+Cinder uses the endpoints in Keystone and a service token to pull that image.
+If Glance rejects that request with 403 or 400, you get “Invalid image identifier”
+
+#Is Glance endpoint reachable by Cinder
+root@ajay-bysr:~# microstack.openstack endpoint list | grep image
+| 06ae80ec188a4b2fb213ee5f3a71e870 | microstack | glance       | image        | True    | admin     | https://10.0.3.15:9292                   |
+| 56295f6025d24595b167c3c611e2c40d | microstack | glance       | image        | True    | internal  | https://10.0.3.15:9292                   |
+| b87f371f341842a8993b3003ed1a0057 | microstack | glance       | image        | True    | public    | https://10.0.3.15:9292 
+
+#Glance endpoints currently use HTTPS (https://10.0.3.15:9292), but the MicroStack snap’s internal services (like Cinder) 
+are likely trying to connect via HTTP. The snap’s internal Python clients often don’t handle HTTPS with self-signed certificates 
+unless you configure cafile/insecure options. 
+That’s why Cinder fails when creating a volume from an image — it cannot complete the HTTPS request to Glance.
+
+Option 1:
+Keep HTTPS but allow insecure/self-signed certs
+If you want to keep HTTPS:
+
+edit:
+/var/snap/microstack/common/etc/cinder/cinder.conf
+[glance]
+glance_api_servers = https://10.0.3.15:9292
+insecure = True
+
+sudo snap restart microstack
+
+microstack.openstack --os-username demo --os-password pass123 --os-project-name demo volume create --size 1 --image demo-cirros testvol
+
+For example:
+root@ajay-bysr:~# vi /var/snap/microstack/common/etc/cinder/cinder.conf
+root@ajay-bysr:~# vi /var/snap/microstack/common/etc/cinder
+root@ajay-bysr:~# sudo snap restart microstack
+2025-09-24T19:44:14Z INFO Waiting for "snap.microstack.cinder-scheduler.service" to stop.
+2025-09-24T19:44:23Z INFO Waiting for "snap.microstack.cinder-uwsgi.service" to stop.
+2025-09-24T19:44:28Z INFO Waiting for "snap.microstack.cluster-uwsgi.service" to stop.
+2025-09-24T19:44:33Z INFO Waiting for "snap.microstack.horizon-uwsgi.service" to stop.
+2025-09-24T19:44:38Z INFO Waiting for "snap.microstack.keystone-uwsgi.service" to stop.
+2025-09-24T19:44:44Z INFO Waiting for "snap.microstack.mysqld.service" to stop.
+2025-09-24T19:44:48Z INFO Waiting for "snap.microstack.neutron-api.service" to stop.
+2025-09-24T19:44:52Z INFO Waiting for "snap.microstack.ovsdb-server.service" to stop.
+2025-09-24T19:44:55Z INFO Waiting for "snap.microstack.placement-uwsgi.service" to stop.
+2025-09-24T19:45:00Z INFO Waiting for "snap.microstack.rabbitmq-server.service" to stop.
+2025-09-24T19:45:04Z INFO Waiting for "snap.microstack.nova-compute.service" to stop.
+2025-09-24T19:45:08Z INFO Waiting for "snap.microstack.ovs-vswitchd.service" to stop.
+Restarted.
+
+--still error and reverted the changes
+--we can create an instance without creating volume from Horizon UI and it should work or continue to fix this to 
+create a volume
+
+--Created a new instance with no volume and using image (demo-cirros)
+
+--Now additionally to test volume creation
+Option 2:
+#Change the Glance endpoints to HTTP
+microstack.openstack endpoint set 06ae80ec188a4b2fb213ee5f3a71e870 --url http://10.0.3.15:9292
+microstack.openstack endpoint set 56295f6025d24595b167c3c611e2c40d --url http://10.0.3.15:9292
+microstack.openstack endpoint set b87f371f341842a8993b3003ed1a0057 --url http://10.0.3.15:9292
+root@ajay-bysr:~# sudo snap restart microstack
+
+--confirm endpoint
+microstack.openstack endpoint list | grep image
+| 06ae80ec188a4b2fb213ee5f3a71e870 | microstack | glance       | image        | True    | admin     | http://10.0.3.15:9292                    |
+| 56295f6025d24595b167c3c611e2c40d | microstack | glance       | image        | True    | internal  | http://10.0.3.15:9292                    |
+| b87f371f341842a8993b3003ed1a0057 | microstack | glance       | image        | True    | public    | http://10.0.3.15:9292   
+
+reverting back since 
+root@ajay-bysr:~# microstack.openstack --os-username demo --os-password pass123 --os-project-name demo volume create --size 1 --image demo-cirros testvol
+Failed to contact the endpoint at http://10.0.3.15:9292 for discovery. Fallback to using that endpoint as the base url.
+Failed to contact the endpoint at http://10.0.3.15:9292 for discovery. Fallback to using that endpoint as the base url.
+The image service for : exists but does not have any supported versions.
+
+microstack.openstack endpoint set 06ae80ec188a4b2fb213ee5f3a71e870 --url https://10.0.3.15:9292
+microstack.openstack endpoint set 56295f6025d24595b167c3c611e2c40d --url https://10.0.3.15:9292
+microstack.openstack endpoint set b87f371f341842a8993b3003ed1a0057 --url https://10.0.3.15:9292
+sudo snap restart microstack
+
+------------------------------
+NOVA Part:
+--create the policy file for Nova
+
+sudo nano /var/snap/microstack/common/etc/nova/nova.conf.d/policy.json
+
+{
+  "compute:create": "role:demo",
+  "compute:get": "role:demo or role:demo2",
+  "compute:get_all": "role:demo or role:demo2"
+}
+
+#Only users with role demo can create instances and Both roles can view instances.
+
+sudo snap restart microstack
+or
+sudo snap restart microstack.nova-api
+
+Test again from UI and from command line
+
+If it succeeds from UI( might be due to caches), 
+--check if policy is fine 
+root@ajay-bysr:~# sudo snap run --shell microstack.nova-api
+root@ajay-bysr:/root# cat /var/snap/microstack/common/etc/nova/nova.conf.d/policy.json
+{
+  "compute:create": "role:demo",
+  "compute:get": "role:demo or role:demo2",
+  "compute:get_all": "role:demo or role:demo2"
+}
+
+Then try from command line
+microstack.openstack --os-username demo2 --os-password pass123 --os-project-name demo \ 
+server create --flavor m1.small --image demo-cirros test-vm
+If it succeeds > 
+
+--check roles assigned to demo2
+root@ajay-bysr:~# microstack.openstack role assignment list --project demo --user demo2
++----------------------------------+----------------------------------+-------+----------------------------------+--------+--------+-----------+
+| Role                             | User                             | Group | Project                          | Domain | System | Inherited |
++----------------------------------+----------------------------------+-------+----------------------------------+--------+--------+-----------+
+| 7e6b60113c59418093a429b305c52fdb | 231c04266ce9464f82d8b53420d31723 |       | 79c1f5b44c17486c9738d4434afb7c3e |        |        | False     |
++----------------------------------+----------------------------------+-------+----------------------------------+--------+--------+-----------+
+root@ajay-bysr:~# microstack.openstack user show demo2
++---------------------+----------------------------------+
+| Field               | Value                            |
++---------------------+----------------------------------+
+| default_project_id  | 79c1f5b44c17486c9738d4434afb7c3e |
+| domain_id           | default                          |
+| enabled             | True                             |
+| id                  | 231c04266ce9464f82d8b53420d31723 |
+| name                | demo2                            |
+| options             | {}                               |
+| password_expires_at | None                             |
++---------------------+----------------------------------+
+
+> Edit or create /var/snap/microstack/common/etc/nova/nova.conf.d/nova-snap.conf and add:
+
+[oslo_policy]
+policy_file = /var/snap/microstack/common/etc/nova/nova.conf.d/policy.json
+
+This forces Nova to load your policy.json, overriding any built-in defaults.
+sudo snap restart microstack
+
+MicroStack’s snap is a single-node, self-contained bundle — it tends to ignore external policy.json files unless you 
+explicitly patch the snap’s policy path.
+
+------------------------------------------
+#Clearing and testing
+Policy enforcement is based on token roles cached by Keystone.
+Log out and log in again, or delete old token environment variables:
+unset OS_TOKEN OS_URL OS_PROJECT_ID OS_PROJECT_NAME OS_USERNAME OS_PASSWORD OS_USER_DOMAIN_NAME OS_PROJECT_DOMAIN_NAME
+
+Still shows error and that confirms:
+In summary, MicroStack's Snap-based architecture restricts the application of custom policy.json files, limiting the ability to implement custom RBAC policies.
+
+
+
+
+
+
+
+
+
+
+
