@@ -35,15 +35,20 @@ IMAGE_URLS="http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img"
 
 --------------------------------------
 #Create and use the stack user
-./tools/create-stack-user.sh
+
 
 Create a new user named stack.
 Add it to the sudo group.
 Set permissions on the devstack folder.
+./tools/create-stack-user.sh
 
+cd ..
 Login as root
 cp -r devstack /opt/stack/
 sudo chown -R stack:sudo /opt/stack/devstack
+
+su - stack
+cd /opt/stack/devstack
 
 # Run stack.sh (this will take a while)
 ./stack.sh
