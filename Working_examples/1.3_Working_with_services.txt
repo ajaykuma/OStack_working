@@ -13,10 +13,7 @@ Note**
 --public → makes image available to all projects (optional).
 
 --if permission denied
-#chmod +r jammy-server-cloudimg-amd64.img
-
-or
-
+chmod +r jammy-server-cloudimg-amd64.img
 sudo cp jammy-server-cloudimg-amd64.img /var/snap/microstack/common/
 
 sudo microstack.openstack image create "Ubuntu-22.04" \
@@ -53,7 +50,7 @@ root@mac1:~# microstack.openstack image list
 ssh-keygen -t rsa -b 4096 -f ~/.ssh/demo-key
 
 #upload public key to OpenStack:
-openstack keypair create --public-key ~/.ssh/demo-key.pub demo-key
+microstack.openstack keypair create --public-key ~/.ssh/demo-key.pub demo-key
 root@mac1:~# sudo cp /root/.ssh/demo-key.pub /var/snap/microstack/common/demo-key.pub
 root@mac1:~# sudo microstack.openstack keypair create --public-key /var/snap/microstack/common/demo-key.pub demo-key
 
@@ -70,7 +67,6 @@ sudo microstack.openstack server create \
   --security-group default \
   --key-name demo-key \
   demo-vm
-
 
 sudo microstack.openstack server list
 
@@ -105,6 +101,7 @@ sudo systemctl restart snap.microstack.nova-compute.service
 
 on mac2:
 Verify connectivity with token
+--check config
 export OS_AUTH_URL=https://10.156.0.5:5000/v3
 export OS_PROJECT_NAME=admin
 export OS_USERNAME=admin

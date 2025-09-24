@@ -69,7 +69,8 @@ echo $PATH
 # Initialize
 #sudo microstack init --auto
 
-The newer MicroStack builds don’t support a generic --auto anymore. You now have to tell it whether the node should be:
+The newer MicroStack builds don’t support a generic --auto anymore. 
+You now have to tell it whether the node should be:
 a control node (API services, Horizon, scheduler, etc.)
 or a compute node (where VMs actually run).
 
@@ -167,7 +168,6 @@ sudo microstack.openstack service list
 | f08661901f1e4ebc8d225bc41fecd4b8 | nova      | compute   |
 +----------------------------------+-----------+-----------+
 
------
 
 #check if you can issue a token
 sudo microstack.openstack token issue
@@ -203,6 +203,11 @@ microstack.openstack router create demo-router
 microstack.openstack router set demo-router --external-gateway external
 microstack.openstack router add subnet demo-router demo-subnet
 
+#To check router has external gateway set
+microstack.openstack router show demo-router -f value -c external_gateway_info
+
+or set it
+microstack.openstack router set demo-router --external-gateway external
 4. Create a security group rule (allow SSH & ping)
 # Allow ICMP (ping)
 microstack.openstack security group rule create --proto icmp default
@@ -298,6 +303,7 @@ ssh cirros@10.20.20.218
 ----------------
 #Cleanup Script:
 sudo apt install vim
+vi cleanup-microstack.sh
 ------
 #!/bin/bash
 set -e
@@ -358,13 +364,14 @@ fi
 echo "Cleanup complete"
 
 ------
-chmod +x cleanup.sh
-./cleanup.sh
+chmod +x cleanup-microstack.sh
+./cleanup-microstack.sh
 
 snap services microstack
 
 ---If msgs which show network could not be deleted
----Networks cannot be deleted if there are ports still attached, usually from leftover DHCP ports or leftover interfaces.
+---Networks cannot be deleted if there are ports still attached, usually from leftover DHCP ports or 
+leftover interfaces.
 # List ports on the network
 microstack.openstack port list --network test
 
@@ -384,8 +391,7 @@ microstack.openstack project list         # demo project should be gone
 
 ---------
 Enhanced script:
-vi cleanup2.sh
-
+vi cleanup2-microstack.sh
 ---
 #!/bin/bash
 set -e
@@ -460,7 +466,7 @@ echo "MicroStack cleanup complete!"
 ==============
 
 All in one setup script
-nano setup.sh
+nano setup-microstack.sh
 ---------
 #!/bin/bash
 set -e
@@ -550,13 +556,14 @@ echo "Setup complete!"
 echo "   VM Name: demo-vm"
 echo "   Floating IP: $FLOATING_IP"
 echo "   SSH Command: ssh -i $KEY_PRIVATE cirros@$FLOATING_IP"
-
 ---------
 chmod +x setup-microstack.sh
 ./setup.sh
 -----------
 Validate
-./validate.sh
+vi validate-microstack.sh
+chmod +x validate-microstack.sh
+./validate-microstack.sh
 ------------------
 snap services microstack
 root@gcp-u1:~# snap services microstack | grep horizon
@@ -634,11 +641,7 @@ sudo snap info microstack
 
 Refer: 1.2_Setup_MN_microstack.txt for multinode setup or adding more nodes to the setup.
 
---to check router has external gateway set
-microstack.openstack router show demo-router -f value -c external_gateway_info
 
-or set it
-microstack.openstack router set demo-router --external-gateway external
 
 
 

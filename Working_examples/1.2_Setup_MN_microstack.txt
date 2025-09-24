@@ -111,7 +111,6 @@ sudo snap remove microstack --purge
 sudo rm -rf /var/snap/microstack /snap/microstack ~/snap/microstack
 sudo snap install microstack --edge
 
-
 --trying adding it again..
 
 on mac1:
