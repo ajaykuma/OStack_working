@@ -50,8 +50,8 @@ sudo apt update && sudo apt upgrade -y
 
 # Install microstack
 sudo apt install snapd
-#sudo snap install core
-#sudo systemctl restart snapd
+sudo snap install core
+sudo systemctl restart snapd
 sudo systemctl daemon-reload
 sudo snap install microstack --edge
 
@@ -145,9 +145,11 @@ microstack purge if needed & rerun
 sudo snap remove --purge microstack
 sudo microstack init --control
 ---------
+
+Configs in /var/snap/microstack/common/etc/
+Login as admin and pswd (from console) , details in /var/snap/microstack/common/etc/microstack.rc
+
 # Check status
-sudo microstack status
-or
 sudo snap services microstack
 
 # Access Horizon dashboard
@@ -209,6 +211,7 @@ microstack.openstack security group rule create --proto icmp default
 microstack.openstack security group rule create --proto tcp --dst-port 22 default
 
 ------
+#Errors 
 root@gcp-u1:~# microstack.openstack security group rule create --proto icmp default
 Error while executing command: ConflictException: 409, Security group rule already exists. Rule id is da0b1177-4a8c-469e-a310-f1bffa36c0dd.
 root@gcp-u1:~# microstack.openstack security group rule create --proto tcp --dst-port 22 default
@@ -267,7 +270,6 @@ microstack.openstack server create --flavor m1.tiny \
 --wait & then check
 microstack.openstack server list
 
-
 --Assign floating IP
 
 # Create a floating IP
@@ -282,6 +284,16 @@ microstack.openstack server add floating ip demo-vm <FLOATING_IP>
 --SSH into VM
 ssh -i ~/cirros-key cirros@<FLOATING_IP>
 [Default username: cirros]
+
+or 
+--check console log
+ping <floating_ip>
+microstack.openstack server show demo-vm -f value -c security_groups
+microstack.openstack keypair show cirros-key
+microstack.openstack console log show demo-vm
+
+ssh cirros@10.20.20.218
+# password: gocubsgo
 
 ----------------
 #Cleanup Script:
@@ -554,8 +566,11 @@ microstack.horizon-uwsgi → this is the service that serves the Horizon web UI.
 MicroStack by default binds to localhost for security.
 > Access from browser:
 http://localhost:80
+or
 http://localhost:8080
+so if logged into host, then directly access on http://localhost
 --------------------------
+If on cloud machine..
 #Option 1#
 >copy and modify the *.pem file
 >sshport-forwarding
@@ -564,8 +579,9 @@ lsof -i :8080
 then locally:
 http://localhost:8080
 
+[optional
 Edit the snap’s config to allow external access:
-sudo snap set microstack dashboard-public-url=http://0.0.0.0
+sudo snap set microstack dashboard-public-url=http://0.0.0.0]
 
 Openstack admin credentials:
 cat /var/snap/microstack/common/etc/microstack.rc
@@ -592,8 +608,8 @@ sudo grep -R "horizon" /var/snap/microstack/common/etc/nginx/
 ssh -i gcp1.pem -L 8443:127.0.0.1:443 hdu@35.246.184.202
 curl -vk https://127.0.0.1/
 lsof -i :8080
-
 ---------------------------------------
+
 #Option 2#
 Editing to expose it to public ip of host
 --Backup NGINX and Horizon config
@@ -601,8 +617,8 @@ sudo cp /var/snap/microstack/common/etc/nginx/sites-enabled/horizon.conf \
         /var/snap/microstack/common/etc/nginx/sites-enabled/horizon.conf.bak
 
 edit sudo vi /var/snap/microstack/common/etc/nginx/sites-enabled/horizon.conf
-listen 0.0.0.0:443 ssl;
-listen <YOUR_VM_PUBLIC_IP>:443 ssl;
+
+listen 0.0.0.0:443 ssl; or listen 443 ssl to > listen private_ip:443 ssl;
 
 Restart
 sudo snap restart microstack.horizon-uwsgi
@@ -614,14 +630,15 @@ Login as admin and pswd from
 /var/snap/microstack/common/etc/microstack.rc
 
 ----------------------
-Final shutdown
-#sudo snap stop microstack (dont do this)
-sudo microstack.openstack service list
-sudo snap start microstack
-sudo microstack.openstack service list
-sudo snap services microstack
+sudo snap info microstack
 
-snap info microstack
+Refer: 1.2_Setup_MN_microstack.txt for multinode setup or adding more nodes to the setup.
+
+--to check router has external gateway set
+microstack.openstack router show demo-router -f value -c external_gateway_info
+
+or set it
+microstack.openstack router set demo-router --external-gateway external
 
 
 

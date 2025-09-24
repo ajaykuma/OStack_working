@@ -1,10 +1,20 @@
+#For multinode setup
+Setup mac1 to be control node
+Setup mac2 to be compute node
+--make sure these machines have pswdless ssh access
+--------------------
+Note** configs in /var/snap/microstack/common/etc/
+
+#On mac1
 root@mac1:~# sudo microstack add-compute
 Use the following connection string to add a new compute node to the cluster (valid for 20 minutes from this moment):
 hKhob3N0bmFtZaoxMC4xNTYuMC41q2ZpbmdlcnByaW50xCCr/lr6cgAjcuyMl8d+wME2lIwPw8BiWIWY7+65VxizWqJpZNkgMGU5YjVjMjU1ZmIxNGNjOTlmYzFiNTRhMGU0ZDRkNzamc2VjcmV02SBEdHVpRldpVUV2WHpDNGhBa25VRXlmTkFPeW9zalhRUA==
 
 root@mac2:~# sudo microstack init --auto --compute --join "hKhob3N0bmFtZaoxMC4xNTYuMC41q2ZpbmdlcnByaW50xCCr/lr6cgAjcuyMl8d+wME2lIwPw8BiWIWY7+65VxizWqJpZNkgMGU5YjVjMjU1ZmIxNGNjOTlmYzFiNTRhMGU0ZDRkNzamc2VjcmV02SBEdHVpRldpVUV2WHpDNGhBa25VRXlmTkFPeW9zalhRUA=="
 
-on both nodes:
+Once the compute node is joined, OpenStack should recognize it as a hypervisor. To see how many compute nodes
+#This shows every host running nova-compute 
+--we can run on both nodes:
 root@mac2:~# microstack.openstack hypervisor list
 +----+---------------------+-----------------+------------+-------+
 | ID | Hypervisor Hostname | Hypervisor Type | Host IP    | State |
@@ -12,7 +22,23 @@ root@mac2:~# microstack.openstack hypervisor list
 |  1 | mac1                | QEMU            | 10.156.0.5 | up    |
 |  2 | mac2                | QEMU            | 10.156.0.6 | up    |
 
+--show info of each node
+sudo microstack.openstack hypervisor show mac1
+sudo microstack.openstack hypervisor show mac2
 
+--check what roles each node is running
+root@mac1:~# microstack.openstack compute service list
++----+----------------+------+----------+---------+-------+----------------------------+
+| ID | Binary         | Host | Zone     | Status  | State | Updated At                 |
++----+----------------+------+----------+---------+-------+----------------------------+
+|  5 | nova-conductor | mac1 | internal | enabled | up    | 2025-09-21T01:44:30.000000 |
+|  6 | nova-scheduler | mac1 | internal | enabled | up    | 2025-09-21T01:44:31.000000 |
+|  9 | nova-compute   | mac1 | nova     | enabled | up    | 2025-09-21T01:44:38.000000 |
+| 12 | nova-compute   | mac2 | nova     | enabled | up    | 2025-09-21T01:44:32.000000 |
++----+----------------+------+----------+---------+-------+----------------------------+
+
+microstack.openstack compute service list --host mac1
+microstack.openstack compute service list --host mac2
 on control node:
 root@mac1:~# microstack.openstack service list
 +----------------------------------+-----------+-----------+
@@ -34,15 +60,92 @@ on both nodes:root@mac2:~# microstack.openstack image list
 | d67443f2-1d54-4c8a-8cf2-1f92ae304635 | cirros | active |
 +--------------------------------------+--------+--------+
 
+--check servers running 
+root@mac1:~# microstack.openstack server list --host mac1
+root@mac1:~# microstack.openstack server list --host mac2
 
-After restart
-sudo snap start microstack
-sudo snap services microstack
+------------
+#Removing a compute node from a MicroStack multinode cluster 
+We need to carefully take it out of both OpenStack’s database and the actual machine.
 
-rejoin compute node if needed
-microstack.openstack service list
-microstack.openstack hypervisor list
-microstack.openstack image list
+root@mac1:~# microstack.openstack compute service list --host mac1
+
+root@mac1:~# microstack.openstack compute service set --disable mac2 nova-compute
+root@mac1:~# microstack.openstack compute service list --host mac2
+
+#Evacuate/migrate instances ,
+If there are running instances on the compute node, move or delete them:
+#microstack.openstack server migrate --live <target-host> <server-id>
+--or delete if not needed
+#microstack.openstack server delete <server-id>
+
+--check servers running again
+root@mac1:~# microstack.openstack server list --host mac1
+root@mac1:~# microstack.openstack server list --host mac2
+
+#Delete compute service
+Note* Here 12 is the service id
+root@mac1:~# microstack.openstack compute service delete 12
+root@mac1:~# microstack.openstack compute service list --host mac2
+
+root@mac1:~# microstack.openstack hypervisor list
++----+---------------------+-----------------+------------+-------+
+| ID | Hypervisor Hostname | Hypervisor Type | Host IP    | State |
++----+---------------------+-----------------+------------+-------+
+|  1 | mac1                | QEMU            | 10.156.0.5 | up    |
++----+---------------------+-----------------+------------+-------+
+root@mac1:~# microstack.openstack compute service list --host mac1
++----+----------------+------+----------+---------+-------+----------------------------+
+| ID | Binary         | Host | Zone     | Status  | State | Updated At                 |
++----+----------------+------+----------+---------+-------+----------------------------+
+|  5 | nova-conductor | mac1 | internal | enabled | up    | 2025-09-21T02:11:30.000000 |
+|  6 | nova-scheduler | mac1 | internal | enabled | up    | 2025-09-21T02:11:31.000000 |
+|  9 | nova-compute   | mac1 | nova     | enabled | up    | 2025-09-21T02:11:28.000000 |
++----+----------------+------+----------+---------+-------+----------------------------+
+
+root@mac1:~# microstack.openstack compute service list --host mac2
+<nothing>
+
+--if same node needs to be added to a proper cleanup, to clear up state/stale entries
+sudo snap remove microstack --purge
+sudo rm -rf /var/snap/microstack /snap/microstack ~/snap/microstack
+sudo snap install microstack --edge
+
+
+--trying adding it again..
+
+on mac1:
+sudo microstack add-compute > /tmp/join.token
+scp /tmp/join.token root@mac2:/tmp/
+
+on mac2:
+root@mac2:~# sudo microstack init --auto --compute --join "$(cat /tmp/join.token)"
+
+------------------------
+if fails:
+microstack init expects a fresh, uninitialized snap on the compute node.
+
+sudo snap stop microstack
+
+--cleanup
+sudo rm -rf /var/snap/microstack/common/cluster
+sudo rm -rf /var/snap/microstack/common/certs
+sudo rm -rf /var/snap/microstack/common/config.yaml
+sudo rm -rf /var/snap/microstack/common/juju  # sometimes leftover
+
+root@mac2:~# sudo microstack init --auto --compute --join "$(cat /tmp/join.token)"
+--if error
+cluster.client.UnauthorizedRequestError: Failed to pass authorization using the data provided in the request
+This means the join token is no longer valid. Even though you removed mac2 from OpenStack, MicroStack’s cluster 
+tokens are single-use and can’t be reused after a failed attempt.
+
+
+
+
+
+
+
+
 
 
 

@@ -1,0 +1,124 @@
+#Glance:
+Dwnload an image
+wget https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+
+root@mac1:~# sudo microstack.openstack image create "Ubuntu-22.04" \
+  --file jammy-server-cloudimg-amd64.img \
+  --disk-format qcow2 \
+  --container-format bare \
+  --public
+
+Note**
+--disk-format qcow2 → common format for KVM.
+--public → makes image available to all projects (optional).
+
+--if permission denied
+#chmod +r jammy-server-cloudimg-amd64.img
+
+or
+
+sudo cp jammy-server-cloudimg-amd64.img /var/snap/microstack/common/
+
+sudo microstack.openstack image create "Ubuntu-22.04" \
+  --file /var/snap/microstack/common/jammy-server-cloudimg-amd64.img \
+  --disk-format qcow2 \
+  --container-format bare \
+  --public
+
+root@mac1:~# microstack.openstack image list
++--------------------------------------+--------------+--------+
+| ID                                   | Name         | Status |
++--------------------------------------+--------------+--------+
+| 3879a4d6-548e-4c50-9ae7-ce157dd5484d | Ubuntu-22.04 | active |
+| d67443f2-1d54-4c8a-8cf2-1f92ae304635 | cirros       | active |
++--------------------------------------+--------------+--------+
+
+#If no network
+#microstack.openstack network create demo-net
+
+#Create subnet
+#microstack.openstack subnet create --network demo-net \
+  --subnet-range 192.168.10.0/24 demo-subnet
+
+#create a router and connect to external network
+#microstack.openstack router create demo-router
+#microstack.openstack router set demo-router --external-gateway public
+#microstack.openstack router add subnet demo-router demo-subnet
+
+#create sg rules
+#microstack.openstack security group rule create --proto icmp default
+#microstack.openstack security group rule create --proto tcp --dst-port 22 default
+
+#create key par(if nt done)
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/demo-key
+
+#upload public key to OpenStack:
+openstack keypair create --public-key ~/.ssh/demo-key.pub demo-key
+root@mac1:~# sudo cp /root/.ssh/demo-key.pub /var/snap/microstack/common/demo-key.pub
+root@mac1:~# sudo microstack.openstack keypair create --public-key /var/snap/microstack/common/demo-key.pub demo-key
+
+--choose a flavour
+openstack flavor list
+
+#get network id
+sudo microstack.openstack network list
+
+sudo microstack.openstack server create \
+  --flavor m1.small \
+  --image "Ubuntu-22.04" \
+  --nic net-id=7d779cc9-fad1-405d-8e03-62d5861877c0 \
+  --security-group default \
+  --key-name demo-key \
+  demo-vm
+
+
+sudo microstack.openstack server list
+
+--Assign floating ip
+sudo microstack.openstack floating ip create external
+sudo microstack.openstack server add floating ip demo-vm <floating-ip>
+
+ssh -i ~/.ssh/demo-key ubuntu@<floating-ip>
+
+-------------------
+sudo microstack.openstack network list
+sudo microstack.openstack hypervisor list
+sudo microstack.openstack router list
+sudo microstack.openstack subnet list
+sudo microstack.openstack availability zone list --long
+
+sudo microstack.openstack server create \
+  --flavor m1.small \
+  --image "Ubuntu-22.04" \
+  --nic net-id=7d779cc9-fad1-405d-8e03-62d5861877c0 \
+  --security-group default \
+  --key-name demo-key \
+  --availability-zone nova:mac2 \
+  demo-vm-mac2
+
+Check,if fails
+sudo microstack.openstack server show demo-vm-mac2 -c status -c fault -c OS-EXT-SRV-ATTR:host
+sudo journalctl -u snap.microstack.nova-compute -n 50
+root@mac2:~# curl -k https://10.156.0.5:9292/v2/images
+also check: sudo nano /var/snap/microstack/common/etc/nova/nova.conf
+sudo systemctl restart snap.microstack.nova-compute.service
+
+on mac2:
+Verify connectivity with token
+export OS_AUTH_URL=https://10.156.0.5:5000/v3
+export OS_PROJECT_NAME=admin
+export OS_USERNAME=admin
+export OS_PASSWORD=<ADMIN_PASSWORD>
+export OS_USER_DOMAIN_NAME=Default
+export OS_PROJECT_DOMAIN_NAME=Default
+export OS_IDENTITY_API_VERSION=3
+
+
+
+
+
+
+
+
+
+

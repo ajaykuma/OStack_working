@@ -11,11 +11,7 @@ Install RDO
 sudo dnf install -y http://trunk.rdoproject.org/rdo_release/rdo-release.el9s.rpm
 
 Update metadata / repos
-sudo dnf clean all
-sudo dnf makecache
 sudo dnf update
-
-
 sudo dnf clean all
 sudo dnf makecache
 sudo dnf install -y openstack-packstack
@@ -32,9 +28,45 @@ http://<your_host_ip>/dashboard
 Load credentials for use;
 source ~/keystonerc_admin
 
-openstack project list
-openstack server list
+openstack service list
 
+openstack endpoint list
+openstack compute service list
+openstack hypervisor list
+
+# List projects
+openstack project list
+
+# List users
+openstack user list
+
+# List networks
+openstack network list
+
+# List images
+openstack image list
+----------------------------------
+If msgs like:
+Warning: NetworkManager is active on 10.156.0.10.
+OpenStack networking currently does not work on systems that have the Network Manager service enabled.
+
+sudo systemctl stop NetworkManager
+sudo systemctl disable NetworkManager
+sudo systemctl enable network
+sudo systemctl start network
+
+--for web access
+Port frwarding:
+[root@cent1 ~]# ssh -L 8080:10.156.0.10:80 root@34.159.54.94
+Then from local: http://localhost:8080/dashboard
+If still use, it might be behind nginx
+
+--for time sync (optional)
+sudo dnf install -y chrony
+sudo systemctl enable --now chronyd
+
+---------------------------------
+#if packstack is runing, then we can test.
 #Launching a vm
 1. Upload a cloud image:
 wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
