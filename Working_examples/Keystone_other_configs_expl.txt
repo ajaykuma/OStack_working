@@ -131,7 +131,8 @@ or show some error.
 Note**
 Policy enforcement is evaluated by the service API (Nova in this case), not Horizon itself — Horizon just reflects those rules.
 If you don’t restart the snap after editing policy.json, it will not reload the new policy.
-This works even if both users are in the same project, because policy decisions are based on roles, not projects.
+This works even if both users are in the same project, because policy 
+decisions are based on roles, not projects.
 
 Even though you added a policy.json in Horizon’s config directory, that file is only used by Horizon (the web UI) — 
 it is not consulted by Nova, Glance, Neutron, etc. when enforcing permissions.
@@ -142,7 +143,8 @@ The actual enforcement of who can compute:create, compute:delete, etc. is done i
 How to enforce RBAC in MicroStack Nova
 ----------------------------------------------------------------------
 
-#From horizon UI both users show launch instance option but it doesnt show networks which are existing and thus not able to create instance from horizon.
+#From horizon UI both users show launch instance option but it doesnt show networks
+ which are existing and thus not able to create instance from horizon.
 
 When you click “Launch Instance” in Horizon, the UI fetches network choices from Neutron via its API.
 If the API call returns zero networks, Horizon will show the form but fail at the “Networks” step — making instance creation impossible.
@@ -171,7 +173,8 @@ microstack.openstack network create --project demo demo-net
 microstack.openstack subnet create --network demo-net --subnet-range 192.168.100.0/24 demo-subnet
 
 Reason 2:
-Even if the network exists and is shared, Horizon will hide it if Neutron’s policy.json says the role can’t list networks.
+Even if the network exists and is shared, Horizon will hide it if Neutron’s policy.json 
+says the role can’t list networks.
 Is there any policy for neutron: NO
 Check > /var/snap/microstack/common/etc/neutron/policy.json
 
@@ -258,7 +261,8 @@ Before doing that check logs
 sudo less /var/snap/microstack/common/log/nova/nova.log
 
 In log errors points to cinder
-Nova is trying to talk to Cinder (block storage) to create a boot volume from the image, and Cinder is the one saying 
+Nova is trying to talk to Cinder (block storage) to create a boot volume from the image, and 
+Cinder is the one saying 
 "Invalid image identifier" — not Glance.
 
 Try and check if Cinder can see the image
@@ -433,7 +437,8 @@ policy_file = /var/snap/microstack/common/etc/nova/nova.conf.d/policy.json
 This forces Nova to load your policy.json, overriding any built-in defaults.
 sudo snap restart microstack
 
-MicroStack’s snap is a single-node, self-contained bundle — it tends to ignore external policy.json files unless you 
+MicroStack’s snap is a single-node, self-contained bundle — it tends to ignore external policy.json 
+files unless you 
 explicitly patch the snap’s policy path.
 
 ------------------------------------------
@@ -443,7 +448,8 @@ Log out and log in again, or delete old token environment variables:
 unset OS_TOKEN OS_URL OS_PROJECT_ID OS_PROJECT_NAME OS_USERNAME OS_PASSWORD OS_USER_DOMAIN_NAME OS_PROJECT_DOMAIN_NAME
 
 Still shows error and that confirms:
-In summary, MicroStack's Snap-based architecture restricts the application of custom policy.json files, limiting the ability to implement custom RBAC policies.
+In summary, MicroStack's Snap-based architecture restricts the application of custom policy.json files, 
+limiting the ability to implement custom RBAC policies.
 
 
 

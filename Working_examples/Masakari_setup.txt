@@ -1,0 +1,165 @@
+#Masakari Project
+
+DevStack is the easiest environment to experiment with Masakari because it supports installing extra OpenStack services directly from source.
+
+Local.conf
+[[local|localrc]]
+ADMIN_PASSWORD=secret
+DATABASE_PASSWORD=$ADMIN_PASSWORD
+RABBIT_PASSWORD=$ADMIN_PASSWORD
+SERVICE_PASSWORD=$ADMIN_PASSWORD
+HOST_IP=127.0.0.1
+
+# Enable core services
+enable_service n-cpu n-api n-cond n-sch placement-api placement-client
+enable_service keystone glance nova neutron
+
+# Enable Masakari
+enable_plugin masakari https://opendev.org/openstack/masakari
+enable_plugin masakari-monitors https://opendev.org/openstack/masakari-monitors
+
+
+./stack.sh
+
+=========================
+DevStack Component Timing
+ (times are in seconds)  
+=========================
+wait_for_service      17
+async_wait           122
+osc                  282
+apt-get               39
+test_with_retry        1
+dbsync                 7
+pip_install          102
+apt-get-update         1
+run_process           40
+-------------------------
+Unaccounted time      87
+=========================
+Total runtime        698
+
+=================
+ Async summary
+=================
+ Time spent in the background minus waits: 422 sec
+ Elapsed time: 698 sec
+ Time if we did everything serially: 1120 sec
+ Speedup:  1.60458
+
+
+Post-stack database query stats:
++------------+-----------+-------+
+| db         | op        | count |
++------------+-----------+-------+
+| keystone   | SELECT    | 20952 |
+| keystone   | UPDATE    |     7 |
+| keystone   | INSERT    |    92 |
+| neutron    | DESCRIBE  |     2 |
+| neutron    | CREATE    |     1 |
+| neutron    | SHOW      |     4 |
+| neutron    | SELECT    |  6234 |
+| neutron    | INSERT    |   843 |
+| neutron    | DELETE    |    32 |
+| placement  | SELECT    |    18 |
+| placement  | INSERT    |    79 |
+| placement  | SET       |     2 |
+| neutron    | UPDATE    |   288 |
+| nova_api   | SELECT    |    50 |
+| nova_cell0 | SELECT    |    25 |
+| nova_cell1 | SELECT    |    59 |
+| nova_cell0 | INSERT    |     5 |
+| nova_cell0 | UPDATE    |     2 |
+| placement  | UPDATE    |     3 |
+| cinder     | SELECT    |    55 |
+| cinder     | INSERT    |     5 |
+| cinder     | UPDATE    |     3 |
+| nova_cell1 | INSERT    |     4 |
+| nova_cell1 | UPDATE    |    14 |
+| glance     | INSERT    |    14 |
+| glance     | SELECT    |    27 |
+| glance     | UPDATE    |     2 |
+| nova_api   | INSERT    |    20 |
+| nova_api   | SAVEPOINT |    10 |
+| nova_api   | RELEASE   |    10 |
+| cinder     | DELETE    |     1 |
++------------+-----------+-------+
+
+
+
+This is your host IP address: 10.128.0.54
+This is your host IPv6 address: ::1
+Horizon is now available at http://10.128.0.54/dashboard
+Keystone is serving at http://10.128.0.54/identity/
+The default users are: admin and demo
+The password: pass123
+
+Services are running under systemd unit files.
+For more information see: 
+https://docs.openstack.org/devstack/latest/systemd.html
+
+DevStack Version: 2026.1
+Change: a3e37c86cab4ec43a4a6d1c1386abf12bc034db7 Update DEVSTACK_SERIES to 2026.1 2025-09-22 06:04:42 +0000
+OS Version: Ubuntu 24.04 noble
+
+
+-----------------------------------------
+stack@gcpn2-new:~$ source /opt/stack/devstack/openrc admin admin
+stack@gcpn2-new:~$ openstack hypervisor list
+openstack service list | grep masakari
+
+This installs Masakari components (masakari-api, masakari-engine, monitors) along with your usual OpenStack services.
+
+#Masakari organizes hosts into segments — groups of compute nodes that can recover VMs for each other.
+openstack segment create my-segment --recovery-method auto --service-type COMPUTE
+
+--check
+openstack segment list
+
+--Add compute host to segment
+openstack host create --segment my-segment devstack@compute-1
+
+--Boot an instance
+openstack server create --flavor m1.small --image cirros --network private test-vm
+
+--verify
+openstack server list
+
+Now test Masakari’s recovery:
+
+Option A – Simulate host failure
+Stop the compute service:
+sudo systemctl stop devstack@n-cpu.service
+
+Masakari should detect the failure and evacuate the VM to another host (if available).
+
+Option B – Simulate process failure
+Kill libvirtd or nova-compute manually and watch Masakari’s monitors restart it.
+
+Option C – Simulate instance failure
+SSH into the VM and crash it (e.g., echo c > /proc/sysrq-trigger inside the guest if supported). Masakari should reboot or rebuild the instance.
+
+--Monitor
+sudo journalctl -u devstack@masakari-api.service -f
+sudo journalctl -u devstack@masakari-engine.service -f
+
+===================================
+MicroStack is a lightweight, snap-based OpenStack distribution — but Masakari is not included by default.
+To test Masakari on MicroStack, you’d need to:
+
+Manually install the Masakari packages (or build from source).
+
+Configure them to connect to MicroStack’s Keystone, RabbitMQ, and Nova.
+
+Set up segments and hosts manually as shown above.
+
+Use two or more compute nodes if you want to test evacuation properly. (Single-node setups can only reboot the VM, not migrate it.)
+
+Make sure shared storage (like NFS or Ceph) is set up if you want VMs to migrate cleanly.
+
+Check Masakari’s status with:
+openstack segment list
+openstack host list --segment my-segment
+openstack notification list
+
+Masakari DevStack installation: https://docs.openstack.org/masakari/latest/install/devstack.html

@@ -1,0 +1,302 @@
+Glance & Cinder
+------------
+##Microstack
+
+root@mac1:~# microstack.openstack image list --long -f json
+root@mac1:~# microstack.openstack image list --long -f json --private
+root@mac1:~# microstack.openstack image list --long -f json --shared
+root@mac1:~# microstack.openstack image list --status active
+
+Download images
+mkdir images
+cd images
+
+wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+wget http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
+
+chmod +r *.img
+sudo cp *.img /var/snap/microstack/common/images
+
+cd ..
+
+root@mac1:~# ls /var/snap/microstack/common/images/
+cirros-0.4.0-x86_64-disk.img  focal-server-cloudimg-amd64.img
+cirros-0.6.2-x86_64-disk.img  jammy-server-cloudimg-amd64.img
+
+#Image creation
+root@mac1:~# microstack.openstack image create "Ubuntu-22.04" \
+  --file /var/snap/microstack/common/jammy-server-cloudimg-amd64.img \
+  --disk-format qcow2 \
+  --container-format bare \
+  --public
+
+root@mac1:~# microstack.openstack image list
+
+-----------------other tasks to setup VM using image and connecting-----------------
+#If no network
+#microstack.openstack network create demo-net
+
+#Create subnet
+#microstack.openstack subnet create --network demo-net \
+  --subnet-range 192.168.10.0/24 demo-subnet
+
+#create a router and connect to external network
+#microstack.openstack router create demo-router
+#microstack.openstack router set demo-router --external-gateway public
+#microstack.openstack router add subnet demo-router demo-subnet
+
+#create sg rules
+#microstack.openstack security group rule create --proto icmp default
+#microstack.openstack security group rule create --proto tcp --dst-port 22 default
+
+#create key par(if nt done)
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/demo-key
+
+#upload public key to OpenStack:
+microstack.openstack keypair create --public-key ~/.ssh/demo-key.pub demo-key
+root@mac1:~# sudo cp /root/.ssh/demo-key.pub /var/snap/microstack/common/demo-key.pub
+root@mac1:~# sudo microstack.openstack keypair create --public-key /var/snap/microstack/common/demo-key.pub demo-key
+
+--choose a flavour
+openstack flavor list
+
+#get network id
+sudo microstack.openstack network list
+
+#Creating a VM
+sudo microstack.openstack server create \
+  --flavor m1.small \
+  --image "Ubuntu-22.04" \
+  --nic net-id=7d779cc9-fad1-405d-8e03-62d5861877c0 \
+  --security-group default \
+  --key-name demo-key \
+  demo-vm
+
+sudo microstack.openstack server list
+
+--Assign floating ip
+sudo microstack.openstack floating ip create external
+sudo microstack.openstack server add floating ip demo-vm <floating-ip>
+
+ssh -i ~/.ssh/demo-key ubuntu@<floating-ip>
+
+-------------------
+sudo microstack.openstack network list
+sudo microstack.openstack hypervisor list
+sudo microstack.openstack router list
+sudo microstack.openstack subnet list
+sudo microstack.openstack availability zone list --long
+-------------------
+
+sudo microstack.openstack server create \
+  --flavor m1.small \
+  --image "Ubuntu-22.04" \
+  --nic net-id=7d779cc9-fad1-405d-8e03-62d5861877c0 \
+  --security-group default \
+  --key-name demo-key \
+  --availability-zone nova:mac2 \
+  demo-vm-mac2
+
+Check,if fails
+sudo microstack.openstack server show demo-vm-mac2 -c status -c fault -c OS-EXT-SRV-ATTR:host
+sudo journalctl -u snap.microstack.nova-compute -n 50
+root@mac2:~# curl -k https://10.156.0.5:9292/v2/images
+also check: sudo nano /var/snap/microstack/common/etc/nova/nova.conf
+sudo systemctl restart snap.microstack.nova-compute.service
+
+----------------------------------------------
+#Create volume from Glance image:
+microstack.openstack image list
+
+microstack.openstack volume create --image Ubuntu-22.04 --size 10 ubuntu-vol 
+Error: Invalid image identifier or unable to access requested image. (HTTP 400) (Request-ID: req-dbf02316-9ec3-4b57-9561-63f164c8ce00)
+
+--using image ID
+microstack.openstack volume create --image 3879a4d6-548e-4c50-9ae7-ce157dd5484d --size 10 ubuntu-vol
+Invalid image identifier or unable to access requested image. (HTTP 400) (Request-ID: req-35d1f58f-ce58-4af1-a6df-7df7610befa3)
+
+Reason: Cinder cannot fetch the Glance image
+
+--check if image is private
+microstack.openstack image show 3879a4d6-548e-4c50-9ae7-ce157dd5484d | egrep "visibility|owner|protected|status"
+
+--If private, chane to public
+microstack.openstack image set --public 3879a4d6-548e-4c50-9ae7-ce157dd5484d
+
+--If not an issue and if public, check format
+microstack.openstack image show 3879a4d6-548e-4c50-9ae7-ce157dd5484d | egrep "disk_format|container_format"
+
+Should be disk_format=qcow2 or raw, and container_format=bare.
+If it’s something else (like vmdk or ova), Cinder will reject it.
+
+Glance-Cindr configuration:
+[glance]
+api_servers = http://<controller-ip>:9292
+
+If Glance is storing images on local FS, but Cinder expects remote accessible storage (e.g., Ceph RBD, NFS), then Cinder can’t pull the image.
+Make sure Cinder is allowed to download images from Glance (show_multiple_locations=True in glance-api.conf).
+
+Cinder configuration
+
+
+Glance configuration
+[glance_store]
+# Set default glance_store path to writable directory
+filesystem_store_datadir = /var/snap/microstack/common/lib/images
+
+Cinder configuration:
+volumes_dir = /var/snap/microstack/common/lib/volumes
+
+enabled_backends = lvm-loop-based-backend
+[lvm-loop-based-backend]
+volume_driver = cinder.volume.drivers.lvm.LVMVolumeDriver
+iscsi_protocol = iscsi
+target_helper = lioadm
+volume_group = cinder-volumes
+volume_backend_name=lvm-loop-based
+
+Since, Cinder backend is only LVM loop-based.
+LVM doesn’t know how to fetch image bits directly from Glance.
+In DevStack/MicroStack, the "LVM loop backend" is just a fake thin-provisioned LVM sitting on a file. 
+It can only create empty volumes, not clone from a Glance image.
+That’s why Invalid image identifier or unable to access requested image shows up: Cinder can’t pull the Glance image into that backend.
+
+#But before that check if cinder can create volumes
+sudo apt update
+sudo apt install lvm2 -y
+--Check if cinder-volumes VG exists (vgs).
+sudo lvs
+sudo vgs
+
+If none, then there’s nothing for Cinder to create volumes on.
+
+MicroStack expects a VG named cinder-volumes, but it doesn’t create it automatically.
+
+# Create a sparse file for Cinder to use (20G in this example)
+sudo fallocate -l 5G /var/snap/microstack/common/cinder-volumes.img
+
+# Attach it to a loop device
+sudo losetup /dev/loop10 /var/snap/microstack/common/cinder-volumes.img
+
+# Create physical volume
+sudo pvcreate /dev/loop10
+
+# Create VG named cinder-volumes
+sudo vgcreate cinder-volumes /dev/loop10
+
+root@mac1:~# sudo vgs
+  VG             #PV #LV #SN Attr   VSize  VFree 
+  cinder-volumes   1   0   0 wz--n- <5.00g <5.00g
+
+--Microstack runs snap-managed services
+sudo systemctl restart snap.microstack.cinder-*
+
+#Creating empty volume
+microstack.openstack volume create --size 1 test-vol
+
+--what happens here
+You run openstack volume create.
+Cinder asks the LVM driver to carve out an LV in cinder-volumes.
+Then it exports that LV via iSCSI (using lioadm helper, as in your config).
+If any of those steps fail -- volume status error.
+
+Fails
+root@mac1:~# microstack.openstack volume list
++--------------------------------------+----------+--------+------+-------------+
+| ID                                   | Name     | Status | Size | Attached to |
++--------------------------------------+----------+--------+------+-------------+
+| 0441647f-36da-4f41-8c7e-1a3132057a5c | test-vol | error  |    1 |             |
+
+--Verify LVM tools inside the snap runtime
+MicroStack runs Cinder in a snap, which may not see your host’s lvm2 tools.
+root@mac1:~# snap run --shell microstack.cinder-volume
+root@mac1:/root# which lvcreate
+/snap/microstack/245/sbin/lvcreate
+Note**Snap Cinder service sees the LVM binaries
+
+--from host, manually test
+Manually test LVM
+sudo lvcreate -L 1G -n testlv cinder-volumes
+sudo lvs
+Note**LVM works fine on the host
+
+--If lioadm isn’t fully functional inside the snap, Cinder fails after creating the LV.
+sudo snap run --shell microstack.cinder-volume
+which lioadm
+--shows nothing, Cinder can’t export iSCSI targets.
+Conclusion: MicroStack’s loop-LVM backend is essentially a demo backend.
+
+============================
+On Devstack:
+
+wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+
+chmod +r *.img
+sudo cp *.img /var/snap/microstack/common/images
+
+stack@gcpn2-new:~$ ls /etc/glance/glance-api.conf 
+stack@gcpn2-new:~$ ls /etc/glance/glance-cache.conf 
+stack@gcpn2-new:~$ ls /etc/cinder/cinder.conf 
+
+stack@gcpn2-new:~$ openstack volume list
++--------------------------------------+------+--------+------+-------------------------------------+
+| ID                                   | Name | Status | Size | Attached to                         |
++--------------------------------------+------+--------+------+-------------------------------------+
+| ccfc30cf-318e-4e49-acc3-914bbd954d65 |      | in-use |    1 | Attached to adm-insta1 on /dev/vda  |
++--------------------------------------+------+--------+------+-------------------------------------+
+stack@gcpn2-new:~$ openstack image list
++--------------------------------------+--------------------------+--------+
+| ID                                   | Name                     | Status |
++--------------------------------------+--------------------------+--------+
+| 72684af9-da56-43d6-ae56-a038571d0bcd | cirros-0.6.3-x86_64-disk | active |
++--------------------------------------+--------------------------+--------+
+
+openstack image create "Ubuntu-22.04"   --file focal-server-cloudimg-amd64.img   --disk-format q
+cow2   --container-format bare   --public
+
+openstack image list
++--------------------------------------+--------------------------+--------+
+| ID                                   | Name                     | Status |
++--------------------------------------+--------------------------+--------+
+| d061e9ae-666a-4757-9dc6-17b5246d91cc | Ubuntu-22.04             | active |
+| 72684af9-da56-43d6-ae56-a038571d0bcd | cirros-0.6.3-x86_64-disk | active |
++--------------------------------------+--------------------------+--------+
+
+openstack volume create --image Ubuntu-22.04 --size 3 ubuntu-vol
+Throws errors:
+DevStack node is using the default LVM backend (lvmdriver-1) without proper image cloning support,
+i.e. the LVM backend can create empty volumes but cannot fetch Glance images into volumes.
+
+Workaround:
+--Create an empty volume and attach
+openstack volume create --size 3 ubuntu-vol #You can then manually copy an image into it inside the VM.
+or
+
+--Use a backend that supports image cloning
+Ceph RBD backend → Supports Glance→Cinder volume creation.
+NFS backend → Also works, but slower.
+
+--Use Glance-backed ephemeral boot
+Boot a VM directly from Glance image instead of creating a volume,Volumes can be created later by snapshotting the VM if needed.
+openstack server create   --flavor m1.small   --image "Ubuntu-22.04"   --nic net-id=50d453ca-b0b5-40ab-8b7d-5ec5b695866c  adm-insta2
+
+==========================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

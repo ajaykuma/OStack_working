@@ -34,16 +34,73 @@ disable_service q-ovn
 IMAGE_URLS="http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img"
 
 --------------------------------------
+
+##Core Identity, Compute, and Placement
+key → Keystone (Identity Service)
+Provides authentication and authorization for all OpenStack services.
+
+g-api → Glance API service
+Handles image management requests (upload, list, retrieve images).
+
+g-reg → Glance Registry (stores metadata about images)
+In newer OpenStack releases, registry is optional/deprecated, but DevStack still references it.
+
+n-api → Nova API service
+Accepts and responds to end-user compute API calls.
+
+n-sch → Nova Scheduler
+Decides which compute node a new VM should run on.
+
+n-cpu → Nova Compute service
+The worker process that actually launches/manages VMs on the node.
+
+Since you’re on a single node, this runs locally.
+
+n-novnc → noVNC proxy for console access
+Provides browser-based VNC console to instances.
+
+horizon → Dashboard (web UI)
+Web interface for managing OpenStack services.
+
+placement-api / placement-client
+Placement service keeps track of resource inventory (CPU, RAM, disk) across compute nodes.
+
+Scheduler relies on this to place instances.
+
+##Networking
+
+q-svc → Neutron server (networking API + backend plugin)
+Central service for creating networks, subnets, routers, etc.
+
+q-agt → Neutron agent (LinuxBridge agent in your case)
+Manages bridges, interfaces, and networking setup on the node.
+
+q-dhcp → Neutron DHCP agent
+Provides DHCP leases to tenant networks.
+
+q-l3 → Neutron L3 agent
+Manages routing, NAT, floating IPs.
+
+q-meta → Neutron metadata agent
+Serves instance metadata (e.g. user-data scripts) via 169.254.169.254.
+
+disable_service q-ovn
+You’ve chosen LinuxBridge networking instead of OVN (Open Virtual Network)
+
+##Images
+IMAGE_URLS
+Downloads a CirrOS test image (tiny Linux image for testing VM boot).
+=========================================
 #Create and use the stack user
 
-
+--While in devstack directory
+Logged in as root
 Create a new user named stack.
 Add it to the sudo group.
 Set permissions on the devstack folder.
 ./tools/create-stack-user.sh
 
 cd ..
-Login as root
 cp -r devstack /opt/stack/
 sudo chown -R stack:sudo /opt/stack/devstack
 
@@ -128,10 +185,10 @@ Post-stack database query stats:
 
 This is your host IP address: 10.156.0.3
 This is your host IPv6 address: ::1
-Horizon is now available at http://10.156.0.3/dashboard
-Keystone is serving at http://10.156.0.3/identity/
+Horizon is now available at http://10.156.0.3/dashboard --> http://34.147.171.19/dashboard/ 
+Keystone is serving at http://10.156.0.3/identity/ --> http://34.147.171.19/identity
 The default users are: admin and demo
-The password: SummerWinter
+The password: pass123
 
 Services are running under systemd unit files.
 For more information see:
@@ -142,8 +199,44 @@ Change: 63d874e4af67893effbd1ef9daf150fc41d15eec Merge "Restore os_CODENAME for 
 OS Version: Ubuntu 24.04 noble
 
 2025-09-22 01:08:36.049 | stack.sh completed in 442 seconds.
+
+Configs in:
+ls /etc/keystone
+credential-keys  fernet-keys  keystone-uwsgi-public.ini  keystone.conf
+
+ls /etc/neutron/
+api-paste.ini  neutron-api-uwsgi.ini  neutron.conf  plugins  policy.json  rootwrap.conf  rootwrap.d
+
+ls /etc/cinder/
+api-paste.ini  cinder-api-uwsgi.ini  cinder.conf  resource_filters.json  rootwrap.conf  rootwrap.d
+
+ls /etc/nova
+api-paste.ini  nova-api-uwsgi.ini  nova-cpu.conf  nova-metadata-uwsgi.ini  nova.conf  nova_cell1.conf  rootwrap.conf  rootwrap.d
+
+root@gcpn2:~# ls /etc/systemd/system/dev*
+/etc/systemd/system/devstack@c-api.service         /etc/systemd/system/devstack@n-cpu.service
+/etc/systemd/system/devstack@c-sch.service         /etc/systemd/system/devstack@n-novnc-cell1.service
+/etc/systemd/system/devstack@c-vol.service         /etc/systemd/system/devstack@n-sch.service
+/etc/systemd/system/devstack@dstat.service         /etc/systemd/system/devstack@n-super-cond.service
+/etc/systemd/system/devstack@etcd.service          /etc/systemd/system/devstack@neutron-api.service
+/etc/systemd/system/devstack@g-api.service         /etc/systemd/system/devstack@neutron-ovn-maintenance-worker.service
+/etc/systemd/system/devstack@keystone.service      /etc/systemd/system/devstack@neutron-periodic-workers.service
+/etc/systemd/system/devstack@n-api-meta.service    /etc/systemd/system/devstack@neutron-rpc-server.service
+/etc/systemd/system/devstack@n-api.service         /etc/systemd/system/devstack@placement-api.service
+/etc/systemd/system/devstack@n-cond-cell1.service  /etc/systemd/system/devstack@q-ovn-agent.service
+
+Also look at
+/opt/stack/devstack/lib
+/etc/apache2/sites-enabled/
+
+& also look in
+/opt/stack/horizon/openstack_dashboard/
+ls /opt/stack/keystone/
+ls /opt/stack/glance/
+ls /opt/stack/cinder/
+
 --------
-#If using ovs (not needed in our case)
+#If only using ovs (not needed in our case)
 sudo apt install -y openvswitch-switch openvswitch-common
 sudo systemctl enable --now openvswitch-switch
 sudo ovs-vsctl show
@@ -154,10 +247,6 @@ Access: Horizon will be bound to http://127.0.0.1/dashboard → usable if ports 
 Time: First run of stack.sh downloads source & builds, can take 15–30 minutes depending on VM
 
 ----------------------------------
-#If using keystone
-tail -n 50 /opt/stack/logs/keystone.log
-ps aux | grep keystone
-
 sudo apt install -y python3-openstackclient
 #cat /opt/stack/devstack/openrc
 #export OS_AUTH_URL=http://127.0.0.1:5000/v3
@@ -180,6 +269,9 @@ openstack hypervisor list
 openstack server list
 openstack network list
 
+#If using keystone
+tail -n 50 /opt/stack/logs/keystone.log
+ps aux | grep keystone
 =====================================
 nano setup-devstack.sh
 #!/bin/bash
@@ -265,5 +357,84 @@ openstack user delete demo || true
 # Delete networks and routers
 openstack router delete demo-router || true
 openstack network delete demo-net || true
+
+==================================================================
+
+##Scaling devstack
+
+--For Compute Node(s)
+On the new node:
+
+Install DevStack with a minimal config, only enabling Nova compute (n-cpu) and the networking agent (q-agt) so it can connect to your Neutron setup.
+Disable Keystone, Horizon, Glance, API services, etc. (they’ll remain on the controller).
+
+
+Local.conf
+-------------------------
+[[local|localrc]]
+ADMIN_PASSWORD=secret
+DATABASE_PASSWORD=$ADMIN_PASSWORD
+RABBIT_PASSWORD=$ADMIN_PASSWORD
+SERVICE_PASSWORD=$ADMIN_PASSWORD
+SERVICE_TOKEN=tokentoken
+HOST_IP=<IP_of_compute_node>
+
+# Only run nova-compute + networking agent
+enable_service n-cpu q-agt
+
+# Disable everything else (handled by controller)
+disable_service g-api g-reg n-api n-sch horizon placement-api placement-client q-svc q-dhcp q-l3 q-meta
+-------------------------
+
+Ensure this compute node can reach your controller node’s RabbitMQ, Keystone, and database.
+
+--For Glance
+On the new node
+
+Glance is lightweight and usually stays on the controller.
+If you want, you could run Glance API (g-api) and registry (g-reg) on another node and point Nova/Neutron to it via the service catalog.
+
+But in practice, Glance is rarely offloaded unless you want separate image storage backends.
+
+--For Cinder
+On the new node
+
+On a storage node, enable Cinder services:
+c-api (Cinder API – usually stays on controller).
+c-vol (Cinder Volume service – runs where storage is).
+c-sch (Cinder Scheduler – usually controller).
+
+Storage node config > Local.conf
+
+----------------------
+[[local|localrc]]
+ADMIN_PASSWORD=secret
+DATABASE_PASSWORD=$ADMIN_PASSWORD
+RABBIT_PASSWORD=$ADMIN_PASSWORD
+SERVICE_PASSWORD=$ADMIN_PASSWORD
+HOST_IP=<IP_of_cinder_node>
+
+enable_service c-vol
+disable_service n-api n-sch horizon g-api g-reg placement-api q-svc
+-----------------------------
+
+#Testing policy
+--as demo:
+create a new project and add users to it.
+'demo'
+
+--as admin , add another user 'demo2' as 'reader'
+
+--as demo2 , try creating a network
+Error: Failed to create network "demo2-network". Details
+ForbiddenException: 403: Client Error for url: http://10.154.0.2/networking/v2.0/networks, rule:create_network is disallowed by policy
+
+--as admin, projects > modify members > change to 'member' for demo2
+
+--as demo2, try creating a network, should work now.
+
+
+
+
 
 

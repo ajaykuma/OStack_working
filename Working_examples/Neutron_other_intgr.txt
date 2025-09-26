@@ -1,0 +1,91 @@
+#List networks as a regular user
+microstack.openstack --os-username demo --os-password pass123 --os-project-name demo network list
+
+#Verify Keystone catalog registration
+microstack.openstack endpoint list | grep network
+
+#Keystone token validation test
+You can directly query Neutron API with a Keystone token:
+
+TOKEN=$(microstack.openstack token issue -f value -c id)
+curl -s -H "X-Auth-Token: $TOKEN" http://<neutron_internal_url>/v2.0/networks | jq
+
+#Neutron-Keystone integration
+Nova calls Neutron to allocate ports, plug them into bridges, and configure networking when launching an instance.
+microstack.openstack port create --network <tenant-network> test-port
+
+Expected: Port created and status = DOWN.
+If this fails, Nova won’t be able to spawn VMs.
+
+#Launch an instance and watch network port creation
+microstack.openstack server create --flavor m1.small --image cirros --network <tenant-network> test-vm
+
+#check if Neutron created a port
+microstack.openstack port list --server test-vm
+
+#Nova's request to Neutron in logs:
+sudo journalctl -u snap.microstack.nova-compute -f
+
+#Neutron server logs:
+sudo journalctl -u snap.microstack.neutron-server -f
+
+#Check network namespaces (L3/DHCP agents)
+ip netns
+
+qdhcp-<network-id> – DHCP namespace
+qrouter-<router-id> – Router namespace
+
+If missing, Neutron agents may not be running or cannot schedule network resources.
+------------------------------------------------------------
+#Neutron-Nova integration
+Nova relies on Neutron’s metadata proxy to deliver user-data and cloud-init info to instances.
+
+Test metadata from inside a VM
+
+Boot a Cirros VM on a tenant network.
+Log in via console:
+microstack.openstack console url show <vm-name>
+
+Inside VM:
+curl http://169.254.169.254/latest/meta-data/
+
+It should work.
+If it fails:
+--check
+neutron-metadata-agent is running.
+Security group allows metadata access.
+Router exists and connects network to metadata namespace.
+
+------------------------------------------------------
+Neutron -Horizon (optional but useful)
+
+If Horizon networking panels don’t show networks/subnets or fail to create them, it’s often a Keystone or policy issue on Neutron’s API.
+Check by running the same operations via CLI — if CLI works but Horizon fails → Horizon config or policy.json issue.
+
+ETE Flow:
+--create network topology
+microstack.openstack network create test-net
+microstack.openstack subnet create --network test-net --subnet-range 10.50.0.0/24 test-subnet
+microstack.openstack router create test-router
+microstack.openstack router set test-router --external-gateway external
+microstack.openstack router add subnet test-router test-subnet
+
+--boot an instance
+microstack.openstack server create --flavor m1.small --image cirros --network test-net test-vm
+
+--Assign a floating IP
+microstack.openstack floating ip create external
+microstack.openstack server add floating ip test-vm <floating_ip>
+
+Ping and SSH
+
+---------------------------
+Direct API cross-check:
+sudo journalctl -u snap.microstack.nova-compute -u snap.microstack.nova-api -f | grep neutron
+
+Requesting port from Neutron....
+
+-----------------------------
+
+
+

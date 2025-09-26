@@ -1,0 +1,380 @@
+NFS on Devstack
+--------------
+On Controller Node
+sudo apt install nfs-kernel-server -y
+sudo mkdir -p /var/lib/nova/instances
+sudo chown nova:nova /var/lib/nova/instances
+echo "/var/lib/nova/instances *(rw,sync,no_root_squash)" | sudo tee -a /etc/exports
+sudo exportfs -a
+
+On Each Compute Node
+sudo apt install nfs-common -y
+sudo systemctl stop devstack@n-cpu.service
+sudo mv /var/lib/nova/instances /var/lib/nova/instances.bak
+sudo mkdir -p /var/lib/nova/instances
+sudo mount <CONTROLLER_IP>:/var/lib/nova/instances /var/lib/nova/instances
+
+--make mount persistent
+echo "<CONTROLLER_IP>:/var/lib/nova/instances /var/lib/nova/instances nfs defaults 0 0" | sudo tee -a /etc/fstab
+
+sudo chown nova:nova /var/lib/nova/instances
+sudo systemctl start devstack@n-cpu.service
+
+Verify mount:
+mount | grep instances
+
+ls /var/lib/nova/instances/
+
+------------------
+Nova config:
+grep images_type /etc/nova/nova.conf	#Should show nfs for shared storage
+Instance location:
+ls /var/lib/nova/instances/	#Should show same VMs on all compute nodes
+Disk path test:
+find /var/lib/nova/instances/ -name disk	#Same UUID path must exist on all nodes
+Evacuation test:
+openstack server evacuate <id>	#Works only if shared storage is enabled
+------------------
+
+===========================
+Ceph Setup:
+Install Ceph packages
+
+On all nodes:
+sudo apt update
+sudo apt install cephadm ceph-common -y
+
+#Bootstrap a Ceph clster on controller
+mkdir ~/ceph-cluster
+cd ~/ceph-cluster
+
+# create initial monitor
+sudo cephadm bootstrap --mon-ip 10.128.0.5
+
+--check cluster health:
+ceph -s
+
+--on controller
+#Add OSDs (disks)
+On each node, pick a free disk: 
+lsblk -f
+sudo pvdisplay
+sudo vgdisplay
+sudo lvdisplay
+sudo wipefs -a /dev/loop8
+sudo ceph orch device ls --refresh
+OR: sudo dd if=/dev/zero of=/dev/loop8 bs=1M status=progress
+sudo ceph orch daemon add osd gcpn2-new:/dev/loop8
+
+or add a new empty disk
+sudo wipefs -a /dev/sdb
+sudo dd if=/dev/zero of=/dev/sdb bs=1M count=10
+sudo ceph orch device ls --refresh
+
+root@gcpn2-new:~# sudo ceph orch host ls
+HOST       ADDR         LABELS  STATUS  
+gcpn2-new  10.128.0.54  _admin          
+1 hosts in cluster
+
+if still issues, edit /etc/ceph/ceph.conf
+[osd]
+osd_mkfs_type = xfs
+lvm_volumes_filter = a|/dev/sdb|
+
+
+root@gcpn2-new:~/ceph-cluster# sudo ceph orch device ls --refresh
+HOST       PATH      TYPE  DEVICE ID                   SIZE  AVAILABLE  REFRESHED  REJECT REASONS  
+gcpn2-new  /dev/sdb  ssd   PersistentDisk_gcpn2-addd  50.0G  Yes        7m ago
+
+--restart & check
+------------------additinal errors-------------
+root@gcpn2-new:~/ceph-cluster# sudo cephadm ls | grep mgr
+ 
+root@gcpn2-new:~/ceph-cluster# sudo systemctl restart ceph-59d5e48e-9a9b-11f0-889e-42010a800036@mgr.gcpn2-new.esqjsg
+root@gcpn2-new:~/ceph-cluster# sudo cephadm shell -- ceph mgr module disable orchestrator
+
+root@gcpn2-new:~/ceph-cluster# sudo cephadm shell -- ceph mgr module enable orchestrator
+
+---------------------------------------------
+
+--or use raw instead of lvm
+root@gcpn2-new:~/ceph-cluster# sudo ceph orch daemon add osd gcpn2-new:/dev/sdb raw
+Created osd(s) 0 on host 'gcpn2-new'
+root@gcpn2-new:~/ceph-cluster# ceph osd status
+ID  HOST        USED  AVAIL  WR OPS  WR DATA  RD OPS  RD DATA  STATE      
+ 0  gcpn2-new  26.4M  49.9G      0        0       0        0   exists,up  
+
+ceph -s
+ceph osd tree
+root@gcpn2-new:~/ceph-cluster# ceph osd tree
+ID  CLASS  WEIGHT   TYPE NAME           STATUS  REWEIGHT  PRI-AFF
+-1         0.04880  root default                                 
+-3         0.04880      host gcpn2-new                           
+ 0    ssd  0.04880          osd.0           up   1.00000  1.00000
+
+#create pools for openstack
+
+ceph osd pool create volumes 32
+ceph osd pool create images 32
+ceph osd pool create vms 32
+
+#Create Ceph users for OS
+ceph auth get-or-create client.glance mon 'profile rbd' osd 'profile rbd pool=images' \
+    > /etc/ceph/ceph.client.glance.keyring
+
+ceph auth get-or-create client.cinder mon 'profile rbd' osd 'profile rbd pool=volumes' \
+    > /etc/ceph/ceph.client.cinder.keyring
+
+ceph auth get-or-create client.nova mon 'profile rbd' osd 'profile rbd pool=vms' \
+    > /etc/ceph/ceph.client.nova.keyring
+
+-----------------------
+--check permissions
+sudo cp /etc/ceph/ceph.conf /etc/ceph/
+sudo cp /etc/ceph/ceph.client.*.keyring /etc/ceph/
+
+--check/fix permissions
+sudo chown glance:glance /etc/ceph/ceph.client.glance.keyring
+sudo chown cinder:cinder /etc/ceph/ceph.client.cinder.keyring
+sudo chown nova:nova /etc/ceph/ceph.client.nova.keyring
+
+
+--Configure Openstack Services
+--update glance-api.conf
+
+[glance_store]
+stores = rbd
+default_store = rbd
+rbd_store_pool = images
+rbd_store_user = glance
+rbd_store_ceph_conf = /etc/ceph/ceph.conf
+
+--edit cinder.conf
+[DEFAULT]
+enabled_backends = ceph
+
+[ceph]
+volume_driver = cinder.volume.drivers.rbd.RBDDriver
+rbd_pool = volumes
+rbd_user = cinder
+rbd_ceph_conf = /etc/ceph/ceph.conf
+volume_backend_name = ceph
+
+edit nova.conf
+[libvirt]
+images_type = rbd
+images_rbd_pool = vms
+images_rbd_ceph_conf = /etc/ceph/ceph.conf
+rbd_user = nova
+rbd_secret_uuid = <uuid>
+
+----generate secret--------------
+uuidgen
+# copy the UUID into nova.conf under rbd_secret_uuid
+
+cat > secret.xml <<EOF
+<secret ephemeral='no' private='no'>
+  <uuid><your-uuid></uuid>
+  <usage type='ceph'>
+    <name>client.nova secret</name>
+  </usage>
+</secret>
+EOF
+
+sudo virsh secret-define --file secret.xml
+sudo virsh secret-set-value --secret <your-uuid> --base64 $(ceph auth get-key client.nova)
+
+
+
+
+
+
+
+
+
+--------------------------------
+
+restart services..
+--upload image
+openstack image create "ubuntu-22.04" --disk-format qcow2 --container-format bare --file ubuntu-22.04.qcow2
+
+--create cinder volume from glance image
+openstack volume create --image ubuntu-22.04 --size 10 test-vol
+
+--boot vm from volume
+openstack server create --flavor m1.small --volume test-vol --network private vm1
+
+openstack server migrate --live <compute2-host> --wait vm1
+
+------------------
+[[local|localrc]]
+
+# -----------------------
+# Credentials & Host
+# -----------------------
+ADMIN_PASSWORD=secret
+DATABASE_PASSWORD=$ADMIN_PASSWORD
+RABBIT_PASSWORD=$ADMIN_PASSWORD
+SERVICE_PASSWORD=$ADMIN_PASSWORD
+SERVICE_TOKEN=tokentoken
+HOST_IP=127.0.0.1
+
+# -----------------------
+# Core OpenStack services
+# -----------------------
+enable_service key g-api g-reg n-api n-sch n-cpu n-novnc horizon placement-api placement-client
+
+# LinuxBridge networking (simple)
+Q_AGENT=linuxbridge
+enable_service q-svc q-agt q-dhcp q-l3 q-meta
+disable_service q-ovn
+
+# -----------------------
+# Images
+# -----------------------
+IMAGE_URLS="http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img"
+
+# -----------------------
+# Ceph (optional, single-node)
+# -----------------------
+enable_service r-ceph r-ceph-osd r-ceph-mon
+GLANCE_STORE=ceph
+GLANCE_CEPH_POOL=images
+GLANCE_CEPH_USER=glance
+GLANCE_CEPH_SECRET=$ADMIN_PASSWORD
+
+# -----------------------
+# Nova RBD support
+# -----------------------
+VIRT_DRIVER=kvm
+QEMU_USE_CEPH=true
+RBD_POOL=images
+RBD_USER=libvirt
+
+# -----------------------
+# Logging & performance
+# -----------------------
+LOGFILE=$DEST/logs/stack.sh.log
+LOG_COLOR=True
+
+----
+
+#!/bin/bash
+set -e
+
+# ===============================
+# Minimal DevStack + Ceph Setup
+# ===============================
+
+# Variables
+DEVSTACK_DIR="$HOME/devstack"
+ADMIN_PASS="secret"
+CIRROS_URL="http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img"
+IMAGE_NAME="cirros-0.6.2-x86_64-disk"
+STACK_USER=$(whoami)
+
+# 1. Install prerequisites
+sudo apt update
+sudo apt install -y git vim sudo lvm2 qemu-kvm libvirt-daemon-system libvirt-clients python3-openstackclient
+
+# 2. Clone DevStack
+if [ ! -d "$DEVSTACK_DIR" ]; then
+    git clone https://opendev.org/openstack/devstack $DEVSTACK_DIR
+fi
+cd $DEVSTACK_DIR
+
+# 3. Create local.conf for minimal services + Ceph
+cat > local.conf <<EOF
+[[local|localrc]]
+
+ADMIN_PASSWORD=$ADMIN_PASS
+DATABASE_PASSWORD=$ADMIN_PASS
+RABBIT_PASSWORD=$ADMIN_PASS
+SERVICE_PASSWORD=$ADMIN_PASS
+SERVICE_TOKEN=tokentoken
+HOST_IP=127.0.0.1
+
+# Core OpenStack services
+enable_service key g-api g-reg n-api n-sch n-cpu n-novnc horizon placement-api placement-client
+
+# LinuxBridge networking
+Q_AGENT=linuxbridge
+enable_service q-svc q-agt q-dhcp q-l3 q-meta
+disable_service q-ovn
+
+# CirrOS image
+IMAGE_URLS="$CIRROS_URL"
+
+# Ceph (single-node)
+enable_service r-ceph r-ceph-osd r-ceph-mon
+GLANCE_STORE=ceph
+GLANCE_CEPH_POOL=images
+GLANCE_CEPH_USER=glance
+GLANCE_CEPH_SECRET=$ADMIN_PASS
+
+# Nova RBD support
+VIRT_DRIVER=kvm
+QEMU_USE_CEPH=true
+RBD_POOL=images
+RBD_USER=libvirt
+
+# Logging
+LOGFILE=\$DEST/logs/stack.sh.log
+LOG_COLOR=True
+EOF
+
+# 4. Run DevStack
+echo "Starting DevStack installation (this may take 30–60 minutes)..."
+./stack.sh
+
+# 5. Source admin credentials
+source $DEVSTACK_DIR/openrc admin admin
+
+# 6. Create demo project, user & network
+echo "Creating demo project, user, network..."
+openstack project create demo || true
+openstack user create --project demo --password demo demo || true
+openstack role add --user demo --project demo admin || true
+
+openstack network create demo-net || true
+openstack subnet create --network demo-net \
+  --subnet-range 10.0.0.0/24 demo-subnet || true
+
+if ! openstack router show demo-router &>/dev/null; then
+    openstack router create demo-router
+    openstack router set demo-router --external-gateway public
+    openstack router add subnet demo-router demo-subnet
+fi
+
+# 7. Configure security group
+openstack security group rule create --proto icmp default || true
+openstack security group rule create --proto tcp --dst-port 22 default || true
+
+# 8. Generate SSH keypair
+if [ ! -f "$HOME/cirros-key" ]; then
+    ssh-keygen -t rsa -b 2048 -f "$HOME/cirros-key" -N ""
+fi
+openstack keypair create --public-key "$HOME/cirros-key.pub" cirros-key || true
+
+# 9. Launch CirrOS VM
+openstack server create --flavor m1.tiny \
+  --image $IMAGE_NAME \
+  --network demo-net \
+  --key-name cirros-key \
+  demo-vm || true
+
+# 10. Assign floating IP
+FLOATING_IP=$(openstack floating ip create public -f value -c floating_ip_address)
+openstack server add floating ip demo-vm $FLOATING_IP
+
+echo "=============================================="
+echo "Setup complete!"
+echo "VM Name: demo-vm"
+echo "Floating IP: $FLOATING_IP"
+echo "SSH Command: ssh -i $HOME/cirros-key cirros@$FLOATING_IP"
+echo "Horizon Dashboard: http://127.0.0.1/dashboard"
+echo "=============================================="
+
+
+
+

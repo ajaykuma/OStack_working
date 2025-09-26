@@ -51,8 +51,8 @@ ssh-keygen -t rsa -b 4096 -f ~/.ssh/demo-key
 
 #upload public key to OpenStack:
 microstack.openstack keypair create --public-key ~/.ssh/demo-key.pub demo-key
-root@mac1:~# sudo cp /root/.ssh/demo-key.pub /var/snap/microstack/common/demo-key.pub
-root@mac1:~# sudo microstack.openstack keypair create --public-key /var/snap/microstack/common/demo-key.pub demo-key
+sudo cp /root/.ssh/demo-key.pub /var/snap/microstack/common/demo-key.pub
+sudo microstack.openstack keypair create --public-key /var/snap/microstack/common/demo-key.pub demo-key
 
 --choose a flavour
 openstack flavor list
@@ -95,20 +95,11 @@ sudo microstack.openstack server create \
 Check,if fails
 sudo microstack.openstack server show demo-vm-mac2 -c status -c fault -c OS-EXT-SRV-ATTR:host
 sudo journalctl -u snap.microstack.nova-compute -n 50
+
 root@mac2:~# curl -k https://10.156.0.5:9292/v2/images
 also check: sudo nano /var/snap/microstack/common/etc/nova/nova.conf
 sudo systemctl restart snap.microstack.nova-compute.service
 
-on mac2:
-Verify connectivity with token
---check config
-export OS_AUTH_URL=https://10.156.0.5:5000/v3
-export OS_PROJECT_NAME=admin
-export OS_USERNAME=admin
-export OS_PASSWORD=<ADMIN_PASSWORD>
-export OS_USER_DOMAIN_NAME=Default
-export OS_PROJECT_DOMAIN_NAME=Default
-export OS_IDENTITY_API_VERSION=3
 
 
 
